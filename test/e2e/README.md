@@ -129,6 +129,27 @@ give you: a reboot, a GUI login session (so no TCC prompts and no
 `launchctl gui/<uid>` domain), or nested virtualisation, so tier 3 cannot run
 inside it.
 
+## What the hosted runners can and cannot prove
+
+Measured on GitHub-hosted runners (2026-11):
+
+| Runner | Image | Notable |
+|---|---|---|
+| `macos-latest` | macOS 26.7.2 arm64, real Apple silicon | **SIP is disabled** on hosted runners |
+| `windows-latest` | Windows Server 2025 Datacenter 26100 | **`UCPD.sys` is not present** (it ships on consumer Windows 11) |
+
+Consequences, which is exactly why the tier 3 VM is still worth its cost:
+
+- Code identity mechanics (cdhash, designated requirement) are provable on the
+  macOS runner; SIP/TCC *enforcement* is not, because SIP is off.
+- The Windows runner proves registry/accounts/service/files behaviour, but it
+  cannot demonstrate the `UserChoice` identity gate, because the driver is absent.
+  The Windows 11 Pro VM is the only place that assertion means anything.
+- Neither can reboot, log in to a GUI session, or nest a VM.
+
+So: tier 2 = "the real OS agrees with the code"; tier 3 = "the real *machine*
+and its platform gates agree". Do not claim more than that.
+
 ## Why not macOS VMs in CI
 
 GitHub-hosted `macos-latest` runners *are* real macOS on Apple hardware

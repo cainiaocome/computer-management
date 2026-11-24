@@ -122,6 +122,26 @@ test/e2e/vm/macos/run.sh             # 此后全自动
 不是我们安装的。它给不了的是：重启、图形登录会话（因此没有 TCC 弹窗，也没有
 `launchctl gui/<uid>` 域）、以及嵌套虚拟化 —— 所以第 3 层无法在它内部运行。
 
+## 托管 runner 能证明什么、不能证明什么
+
+2026-11 在 GitHub 托管 runner 上的实测：
+
+| Runner | 镜像 | 需要注意 |
+|---|---|---|
+| `macos-latest` | macOS 26.7.2 arm64，真正的 Apple Silicon | 托管 runner 上 **SIP 是关闭的** |
+| `windows-latest` | Windows Server 2025 Datacenter 26100 | **没有 `UCPD.sys`**（它随消费版 Windows 11 提供） |
+
+由此带来的结论，也正说明了第 3 层虚机的价值：
+
+- 代码身份机制（cdhash、designated requirement）在 macOS runner 上可以证明；
+  但 SIP/TCC 的*实际强制*不行，因为 SIP 关闭。
+- Windows runner 能证明注册表/账号/服务/文件行为，但无法演示 `UserChoice`
+  身份闸门，因为驱动不存在。只有 Windows 11 Pro 虚机上的那条断言才有意义。
+- 两者都不能重启、不能登录图形会话、不能嵌套虚机。
+
+因此：第 2 层 = "真实操作系统与代码的判断一致"；第 3 层 = "真实*机器*及其平台闸门
+一致"。不要声称更多。
+
 ## 为什么不把 macOS 虚机放进 CI
 
 GitHub 托管的 `macos-latest` runner *本身就是* Apple 硬件虚拟化上的真实 macOS，
