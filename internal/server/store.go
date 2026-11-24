@@ -7,6 +7,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go driver, no cgo
@@ -38,7 +41,12 @@ type Device struct {
 
 // OpenStore opens (and migrates) the database.
 func OpenStore(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	if d := filepath.Dir(path); d != "" && d != "." && !strings.HasPrefix(path, "file:") {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			return nil, err
+		}
+	}
+	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +111,23 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// sqliteDSN turns a filesystem path into a DSN SQLite understands on every
+// platform. A bare Windows path such as `C:\data\fleet.db` is parsed as a URI
+// with `C:` as the scheme by modernc's driver ("unable to open database file"),
+// so convert it to the documented `file:/C:/data/fleet.db` form.
+func sqliteDSN(path string) string {
+	if strings.HasPrefix(path, "file:") {
+		return path
+	}
+	// ReplaceAll instead of filepath.ToSlash so a Windows path is handled the
+	// same way when this code is compiled on Linux (tests, CI).
+	p := strings.ReplaceAll(path, `\`, "/")
+	if len(p) >= 2 && p[1] == ':' {
+		p = "/" + p
+	}
+	return "file:" + p
 }
 
 func ts(t time.Time) string { return t.UTC().Format(time.RFC3339) }
