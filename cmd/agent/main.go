@@ -86,6 +86,12 @@ func main() {
 			fmt.Println("cycle complete")
 			return
 		}
+		if ok, err := runAsService(log, a.Run); ok {
+			if err != nil {
+				fatalf(log, "service: %v", err)
+			}
+			return
+		}
 		if err := a.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			fatalf(log, "run: %v", err)
 		}

@@ -128,6 +128,11 @@ agent 用 `sc create`（或 `New-Service`）把自身安装为 `LocalSystem`、`
 `sc failure <name> reset= 86400 actions= restart/30000/...`。
 注意：`SESSION 0` 中的服务不能显示 UI，也不能阻塞等待用户输入。
 
+**服务二进制必须调用 `StartServiceCtrlDispatcher`。** 把普通控制台程序注册为服务，
+SCM 会等待 30 秒后以错误 1053（"没有及时响应启动或控制请求"）失败。因此 agent 会
+检测 `svc.IsWindowsService()`，并交给 `golang.org/x/sys/windows/svc` 接管；同一个
+二进制在 `fleet-agent run` 以及 macOS/Linux 上仍以前台方式运行。
+
 ### 1.7 agent 在 Windows 上**做不到**的事
 
 - 用程序设置默认浏览器（UCPD）。

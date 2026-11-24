@@ -56,19 +56,32 @@ function ReportStatus($reports, [string]$Id) {
     return $r.status
 }
 
+# Native runs a command line through cmd.exe with stderr merged, and never
+# throws. With $ErrorActionPreference = 'Stop', a native command that writes to
+# stderr (e.g. `net user missing /delete`) becomes a terminating error, which
+# makes a test suite fail for the wrong reason.
+function Native([string]$line) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $out = cmd /c "$line 2>&1"
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    return [pscustomobject]@{ Output = (($out | Out-String).Trim()); Code = $code }
+}
+
 function UserChoice {
-    $out = & reg query 'HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice' /v ProgId 2>&1
-    return ("exit=$LASTEXITCODE " + ($out -join ' '))
+    $r = Native 'reg query "HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice" /v ProgId'
+    return ("exit=$($r.Code) " + $r.Output)
 }
 
 function EnsureUser([string]$Name, [bool]$Admin) {
-    & net user $Name /delete *>$null | Out-Null
-    & net user $Name $UserPassword /add *>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { return $false }
+    Native "net user $Name /delete" | Out-Null
+    $add = Native "net user $Name $UserPassword /add"
+    if ($add.Code -ne 0) { return $false }
     if ($Admin) {
-        & net localgroup Administrators $Name /add *>$null | Out-Null
+        Native "net localgroup Administrators $Name /add" | Out-Null
     } else {
-        & net localgroup Administrators $Name /delete *>$null | Out-Null
+        Native "net localgroup Administrators $Name /delete" | Out-Null
     }
     return $true
 }
@@ -101,8 +114,8 @@ if (Test-Path $FirefoxPolicy) { Remove-Item -Force $FirefoxPolicy }
 if (Test-Path $CfgPath) { Remove-Item -Force $CfgPath }
 EnsureUser $StdUser $false | Out-Null
 EnsureUser $AdmUser $true | Out-Null
-Check "standard user can be created" ((& net user $StdUser) -join ' ' -match $StdUser)
-Check "admin user can be created" ((& net user $AdmUser) -join ' ' -match $AdmUser)
+Check "standard user can be created" ((Native "net user $StdUser").Output -match $StdUser)
+Check "admin user can be created" ((Native "net user $AdmUser").Output -match $AdmUser)
 
 # --- 2. enrolment ----------------------------------------------------------
 Section "enrolment"
@@ -180,8 +193,7 @@ if ($policyExists) {
 }
 
 Section "account state matches reality"
-$stdGroups = (& net user $StdUser) -join ' '
-$admGroups = (& net localgroup Administrators) -join ' '
+$admGroups = (Native 'net localgroup Administrators').Output
 Check "standard user is not an administrator" ($admGroups -notmatch "\b$StdUser\b")
 Check "admin user really is an administrator" ($admGroups -match "\b$AdmUser\b")
 Check "user.account reports the standard user compliant" ((ReportStatus $reports 'std-user') -eq 'compliant') (ReportStatus $reports 'std-user')

@@ -121,10 +121,17 @@ ssh_guest 'sudo install -m 0755 /tmp/fleet-agent /usr/local/bin/fleet-agent && s
 
 say "running the end-to-end suite inside macOS"
 set +e
-ssh_guest "sudo env SERVER=http://host.lan:$FLEET_PORT ADMIN_TOKEN=$ADMIN_TOKEN \
-  AGENT=/usr/local/bin/fleet-agent \
-  INSTALLER=/tmp/stage/scripts/install-unix.sh \
-  bash /tmp/verify.sh" 2>&1 | tee "$LOGS/verify.log"
+# Forward the server port over this SSH connection (-R) so the guest does not
+# depend on being able to route to the host.
+ssh -i "$SSH_KEY" -p "$SSH_PORT" \
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  -o LogLevel=ERROR -o ConnectTimeout=10 -o BatchMode=yes \
+  -R "$FLEET_PORT:127.0.0.1:$FLEET_PORT" \
+  "$MACOS_USER@127.0.0.1" \
+  "sudo env SERVER=http://127.0.0.1:$FLEET_PORT ADMIN_TOKEN=$ADMIN_TOKEN \
+   AGENT=/usr/local/bin/fleet-agent \
+   INSTALLER=/tmp/stage/scripts/install-unix.sh \
+   bash /tmp/verify.sh" 2>&1 | tee "$LOGS/verify.log"
 RC=${PIPESTATUS[0]}
 set -e
 

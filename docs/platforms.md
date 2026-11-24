@@ -138,6 +138,13 @@ The agent installs itself with `sc create` (or `New-Service`) as `LocalSystem`,
 actions= restart/30000/...`. Note: a service in `SESSION 0` cannot show UI and
 must not block on user input.
 
+**A service binary must call `StartServiceCtrlDispatcher`.** A plain console
+program registered as a service hangs the SCM and fails with error 1053 ("did not
+respond to the start or control request in a timely fashion") after 30 seconds.
+The agent therefore detects `svc.IsWindowsService()` and hands control to
+`golang.org/x/sys/windows/svc`; the same binary still runs in the foreground for
+`fleet-agent run` and for macOS/Linux.
+
 ### 1.7 What an agent *cannot* do on Windows
 
 - Set the default browser programmatically (UCPD).

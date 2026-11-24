@@ -55,7 +55,8 @@ sudo env SERVER=http://127.0.0.1:8080 ADMIN_TOKEN=... \
 - `browser.default` 从不上报 `changed`；Windows 上 `UserChoice` 键在前后逐字节
   一致（证明没有任何东西尝试写它）
 - 第二轮不产生任何变化：generation 相同、文件 mtime 相同
-- 服务 / launchd 任务能安装、运行、干净卸载
+- 服务 / launchd 任务能安装、运行、干净卸载（正是这一项抓到了 agent 缺少
+  `StartServiceCtrlDispatcher`、即错误 1053 的问题）
 - **不许说谎**：任何模块报 `changed`/`compliant` 时，可观测的效果必须真实存在
 
 `verify.sh` 刻意不依赖 `python3`/`jq`：裸装的 macOS 虚机两者都没有。
@@ -73,14 +74,20 @@ DOWN=1  test/e2e/vm/windows/run.sh    # 测试完关闭虚机
 
 工作方式：
 
-1. `oem/install.bat` 在无人值守安装的最后一步运行，启用 OpenSSH 并写入宿主机公钥
-   （`administrators_authorized_keys`）。它还会设置
-   `LocalAccountTokenFilterPolicy=1`，使本地管理员的 SSH 会话是提权的 —— **仅限
-   测试虚机**，真实机器永远不要这么做。
-2. 宿主机在 `:8080` 启动 fleet 服务端（虚机内通过 `host.lan:8080` 访问），编译
-   `fleet-agent.exe` 并放到 `shared/`（虚机内是 `Z:`）。
-3. `run.sh` 等待 SSH，在虚机内运行 `verify.ps1`，并把
-   `C:\fleet-e2e-results.json` 拷回来。
+1. `oem/install.bat` 在无人值守安装的最后一步运行：写入宿主机公钥到
+   `administrators_authorized_keys`，设置 `LocalAccountTokenFilterPolicy=1`
+   （使本地管理员的 SSH 会话提权 —— **仅限测试虚机**），并用 `run.sh` 预先放到
+   `oem/` 里的 **本地 zip** 安装 OpenSSH。
+   刻意不使用 `Add-WindowsCapability`：它要从 Windows Update 拉取
+   Feature-on-Demand，在全新虚机里曾卡住 20 分钟以上。
+2. 宿主机在 `:8080` 启动 fleet 服务端、编译 `fleet-agent.exe`、等待 SSH，然后用
+   `scp` 把 agent 与测试套件复制到 `C:\fleet-e2e`。
+   不使用 dockur 的 `/shared` 挂载：它的盘符映射依赖镜像的登录脚本，在虚机里实测
+   并不存在。
+3. 测试通过 `ssh -R 8080:127.0.0.1:8080` 运行，虚机内访问
+   `http://127.0.0.1:8080` 走反向隧道。虚机无法直接路由到宿主机：
+   `host.lan` 解析到的是容器而不是 Docker 宿主机。
+4. 结果保存在 `logs/verify.log` 与 `C:\fleet-e2e-results.json`。
 
 首次启动会下载约 8 GB 并安装 Windows；普通硬件上预计 20–60 分钟。之后复用
 `storage/`，约一分钟即可启动。

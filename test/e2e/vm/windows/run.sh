@@ -49,6 +49,16 @@ if [ ! -f "$SSH_KEY" ]; then
 fi
 cp "$SSH_KEY.pub" "$HERE/oem/authorized_keys"
 
+# OpenSSH for the guest, installed offline during the unattended install.
+# Add-WindowsCapability would pull it from Windows Update and can hang for a
+# long time in a fresh VM, so stage the release zip instead.
+if [ ! -f "$HERE/oem/OpenSSH-Win64.zip" ]; then
+  say "downloading OpenSSH-Win64.zip for the guest"
+  curl -fsSL -o "$HERE/oem/OpenSSH-Win64.zip" \
+    https://github.com/PowerShell/Win32-OpenSSH/releases/latest/download/OpenSSH-Win64.zip \
+    || die "could not download OpenSSH-Win64.zip (stage it into oem/ manually)"
+fi
+
 # --- build artifacts the guest needs --------------------------------------
 say "building fleet-agent.exe and staging it for the guest"
 mkdir -p "$REPO/bin"
@@ -95,12 +105,36 @@ done
 echo
 say "guest is reachable"
 
+# --- stage files over SSH --------------------------------------------------
+# dockur's /shared mount is not reliably mapped inside the guest (it depends on
+# the image's logon script), so copy what we need with scp instead of relying on
+# a drive letter.
+say "staging the agent and the suite in the guest"
+ssh_guest 'powershell -NoProfile -Command "New-Item -ItemType Directory -Force C:\fleet-e2e | Out-Null"' >/dev/null
+scp -q -i "$SSH_KEY" -P "$SSH_PORT" \
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+  "$HERE/shared/fleet-agent.exe" "$HERE/shared/verify.ps1" "$HERE/shared/install-windows.ps1" \
+  "$VM_USER@127.0.0.1:C:/fleet-e2e/"
+
 # --- run the real suite inside the guest -----------------------------------
 say "running the end-to-end suite inside Windows"
 set +e
-ssh_guest "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\shared\\verify.ps1 -Server http://host.lan:$FLEET_PORT -AdminToken $ADMIN_TOKEN -Agent Z:\\fleet-agent.exe -Installer Z:\\install-windows.ps1" 2>&1 | tee "$LOGS/verify.log"
+# The guest cannot route to the host directly (dockur's host.lan points at the
+# container, and the published port is host-side only), so forward the server
+# port over the same SSH connection with -R and talk to 127.0.0.1 in the guest.
+ssh -i "$SSH_KEY" -p "$SSH_PORT" \
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  -o LogLevel=ERROR -o ConnectTimeout=10 -o BatchMode=yes \
+  -R "$FLEET_PORT:127.0.0.1:$FLEET_PORT" \
+  "$VM_USER@127.0.0.1" \
+  "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\fleet-e2e\\verify.ps1 -Server http://127.0.0.1:$FLEET_PORT -AdminToken $ADMIN_TOKEN -Agent C:\\fleet-e2e\\fleet-agent.exe -Installer C:\\fleet-e2e\\install-windows.ps1" 2>&1 | tee "$LOGS/verify.log"
 RC=${PIPESTATUS[0]}
 set -e
+
+# PowerShell can exit 0 even when the script failed to start, so trust the
+# suite's own summary line as well.
+grep -q 'checks passed' "$LOGS/verify.log" || { echo "suite did not run to completion"; RC=1; }
+if grep -q 'FAIL' "$LOGS/verify.log"; then RC=1; fi
 
 ssh_guest 'powershell -NoProfile -Command "if (Test-Path C:\fleet-e2e-results.json) { Get-Content C:\fleet-e2e-results.json -Raw }"' >"$LOGS/results.json" 2>/dev/null || true
 

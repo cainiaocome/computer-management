@@ -7,10 +7,10 @@ import (
 
 func TestSQLiteDSN(t *testing.T) {
 	cases := map[string]string{
-		"fleet.db":                        "file:fleet.db",
-		"/var/lib/fleet/fleet.db":         "file:/var/lib/fleet/fleet.db",
-		`C:\ProgramData\fleet\fleet.db`:   "file:/C:/ProgramData/fleet/fleet.db",
-		"file:/tmp/x.db?_pragma=wal":       "file:/tmp/x.db?_pragma=wal",
+		"fleet.db":                      "file:fleet.db",
+		"/var/lib/fleet/fleet.db":       "file:/var/lib/fleet/fleet.db",
+		`C:\ProgramData\fleet\fleet.db`: "file:/C:/ProgramData/fleet/fleet.db",
+		"file:/tmp/x.db?_pragma=wal":    "file:/tmp/x.db?_pragma=wal",
 	}
 	for in, want := range cases {
 		if got := sqliteDSN(in); got != want {

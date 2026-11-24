@@ -56,7 +56,8 @@ What they check (all against the live OS, no mocks):
 - `browser.default` never reports `changed`, and on Windows the `UserChoice` key
   is byte-identical before and after (proving nothing tried to write it)
 - a second cycle changes nothing: same generation, same file mtime
-- the service/launchd job installs, runs, and uninstalls cleanly
+- the service/launchd job installs, runs, and uninstalls cleanly (this is what
+  caught the agent missing `StartServiceCtrlDispatcher`, i.e. error 1053)
 - **no lying**: whenever a module reports `changed`/`compliant`, the observable
   effect must exist on disk
 
@@ -75,14 +76,21 @@ disk, `ssh`/`scp`.
 
 How it works:
 
-1. `oem/install.bat` runs at the end of the unattended install and enables
-   OpenSSH plus the host's public key (`administrators_authorized_keys`).
-   It also sets `LocalAccountTokenFilterPolicy=1` so an SSH session of a local
-   administrator is elevated — **test VMs only**, never a real machine.
-2. The host starts a fleet server on `:8080` (reachable from the guest as
-   `host.lan:8080`), builds `fleet-agent.exe`, and drops it in `shared/` (`Z:`).
-3. `run.sh` waits for SSH, runs `verify.ps1` inside the guest, and copies back
-   `C:\fleet-e2e-results.json`.
+1. `oem/install.bat` runs at the end of the unattended install: it installs the
+   host's public key into `administrators_authorized_keys`, sets
+   `LocalAccountTokenFilterPolicy=1` (so an SSH session of a local administrator
+   is elevated — **test VMs only**), and installs OpenSSH **from a local zip**
+   staged by `run.sh` in `oem/`.
+   `Add-WindowsCapability` is deliberately not used: it pulls the
+   Feature-on-Demand from Windows Update and hung for 20+ minutes on a fresh VM.
+2. The host starts a fleet server on `:8080`, builds `fleet-agent.exe`, waits for
+   SSH, and `scp`s the agent plus the suite into `C:\fleet-e2e`.
+   The dockur `/shared` mount is *not* used: its drive mapping depends on the
+   image's logon script and was simply absent in the guest.
+3. The suite runs under `ssh -R 8080:127.0.0.1:8080`, so the guest talks to
+   `http://127.0.0.1:8080` through a reverse tunnel. The guest cannot route to
+   the host: `host.lan` resolves to the container, not the Docker host.
+4. Results land in `logs/verify.log` and `C:\fleet-e2e-results.json`.
 
 First boot downloads ~8 GB and installs Windows; expect 20–60 minutes on modest
 hardware. Later runs reuse `storage/` and start in about a minute.
