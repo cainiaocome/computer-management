@@ -16,6 +16,8 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Called by release.yml so a release cannot be cut unless the real-OS suites pass.
+  workflow_call:
 
 concurrency:
   group: os-e2e-${{ github.ref }}

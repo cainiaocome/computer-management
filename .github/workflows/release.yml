@@ -8,10 +8,14 @@ name: release
 #   3. By hand, from the Actions tab:       Release -> Run workflow
 #      (leave "version" empty to auto-bump from the latest tag)
 #
-# Everything below runs the same gates: vet, unit tests, the logical end-to-end
-# test, then a cross-compile of both binaries for six platforms. A release is
-# only published if all of that passes, and the published artefacts are then
-# downloaded again and verified.
+# Nothing is published unless the full suite passes on the exact commit: the
+# same `ci` workflow that runs on every push (unit tests on Linux, macOS and
+# Windows, plus the logical end-to-end test) and the same `os-e2e` workflow that
+# runs the real-OS suites on GitHub's Windows and macOS runners. Those are called
+# as reusable workflows, so there is a single definition of "passing".
+#
+# After publishing, a final job downloads the release again and verifies
+# byte-identity, the checksums and that the linux binaries execute.
 
 on:
   push:
@@ -140,6 +144,9 @@ jobs:
               echo '```'
               git log -1 --pretty='%h %s'
               echo '```'
+              echo
+              echo 'Gate: the full `ci` suite (unit tests on Linux/macOS/Windows plus logical e2e)'
+              echo 'and the `os-e2e` real-OS suites must pass on this commit before publishing.' 
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -149,9 +156,25 @@ jobs:
           emit draft "$draft"
           emit dry_run "$dry_run"
 
-  build:
-    name: build and verify
+  # --- the gate -------------------------------------------------------------
+  # A release must pass exactly the same tests as a normal push: unit tests on
+  # all three OSes, the logical end-to-end test and the real-OS suites. These are
+  # the same workflow files, so there is one definition of "passing".
+  tests:
+    name: gate / tests
     needs: prepare
+    if: needs.prepare.outputs.release == 'true'
+    uses: ./.github/workflows/ci.yml
+
+  real-os:
+    name: gate / real OS
+    needs: prepare
+    if: needs.prepare.outputs.release == 'true'
+    uses: ./.github/workflows/os-e2e.yml
+
+  build:
+    name: build
+    needs: [prepare, tests, real-os]
     if: needs.prepare.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -163,14 +186,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: vet and unit tests
-        run: |
-          go vet ./...
-          go test ./... -count=1
-
-      - name: logical end-to-end
-        run: bash scripts/e2e.sh
 
       - name: cross-compile
         run: make cross VERSION="${{ needs.prepare.outputs.version }}"

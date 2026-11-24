@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Called by release.yml so a release cannot be cut unless this passes.
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}
