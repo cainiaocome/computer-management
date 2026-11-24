@@ -253,12 +253,16 @@ if command -v codesign >/dev/null 2>&1; then
   [ -n "$H1" ] && [ "$H1" = "$H2" ]
   check "identical content signs to an identical code directory hash" $? "$H1 vs $H2"
 
-  # One changed byte is exactly what a rebuild does.
-  printf 'x' >> "$WORK/a2"
-  codesign -f -s - -i com.fleet.e2e.agent "$WORK/a2" >/dev/null 2>&1
-  H3=$(codesign -dv --verbose=4 "$WORK/a2" 2>&1 | sed -n 's/^CDHash=//p')
+  # One changed byte inside the signed range is exactly what a rebuild does.
+  # (Appending to the file would *not* work: cdhash only covers up to codeLimit,
+  # which is why trailing bytes do not change the identity.) The identifier is
+  # pinned above on purpose: codesign otherwise derives it from the file name.
+  cp "$AGENT" "$WORK/a3"
+  printf '\102' | dd of="$WORK/a3" bs=1 seek=65536 conv=notrunc 2>/dev/null
+  codesign -f -s - -i com.fleet.e2e.agent "$WORK/a3" >/dev/null 2>&1
+  H3=$(codesign -dv --verbose=4 "$WORK/a3" 2>&1 | sed -n 's/^CDHash=//p')
   [ -n "$H3" ] && [ "$H3" != "$H1" ]
-  check "a content change produces a new identity (this is what breaks TCC grants)" $? "$H3"
+  check "a change inside the signed range produces a new identity" $? "$H3"
 
   DR=$(codesign -d -r- "$WORK/a1" 2>&1)
   case "$DR" in
