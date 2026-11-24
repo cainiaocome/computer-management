@@ -215,6 +215,8 @@ section "launchd"
 if [ -n "${INSTALLER:-}" ] && [ -f "$INSTALLER" ]; then
   bash "$INSTALLER" -b "$AGENT" >/dev/null 2>&1
   check "installer exits 0" $?
+  bash "$INSTALLER" -b "$AGENT" >/dev/null 2>&1
+  check "installer is idempotent (second run)" $?
   sleep 2
   launchctl print system/com.fleet.agent >/dev/null 2>&1
   check "launchd job is loaded" $?
@@ -228,6 +230,72 @@ if [ -n "${INSTALLER:-}" ] && [ -f "$INSTALLER" ]; then
   [ $? -ne 0 ]; check "job unloads cleanly" $?
 else
   note "installer not staged (INSTALLER unset); skipping launchd checks"
+fi
+
+# --- 8. code signing identity ----------------------------------------------
+section "code signing identity"
+# macOS binds TCC grants to the *code identity* (designated requirement), not to
+# a path. A cert-signed binary keeps the same identity across rebuilds; an
+# ad-hoc signed one is keyed to its cdhash, so every rebuild re-prompts. That is
+# why docs/provisioning.md insists on one stable signing identity - and it is
+# cheap to prove here.
+if command -v codesign >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then
+  KC="$WORK/signing.keychain-db"
+  cat > "$WORK/openssl.cnf" <<'CNF'
+[req]
+distinguished_name = dn
+x509_extensions = ext
+prompt = no
+[dn]
+CN = Fleet E2E Signing
+[ext]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
+extendedKeyUsage = critical,codeSigning
+CNF
+  ok=1
+  security create-keychain -p fleet "$KC" >/dev/null 2>&1 || ok=0
+  security set-keychain-settings "$KC" >/dev/null 2>&1
+  security unlock-keychain -p fleet "$KC" >/dev/null 2>&1 || ok=0
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -config "$WORK/openssl.cnf"     -keyout "$WORK/k.pem" -out "$WORK/c.pem" >/dev/null 2>&1 || ok=0
+  openssl pkcs12 -export -inkey "$WORK/k.pem" -in "$WORK/c.pem"     -out "$WORK/id.p12" -passout pass:fleet >/dev/null 2>&1 || ok=0
+  security import "$WORK/id.p12" -k "$KC" -P fleet -T /usr/bin/codesign >/dev/null 2>&1 || ok=0
+  security set-key-partition-list -S apple-tool:,apple: -k fleet "$KC" >/dev/null 2>&1
+
+  if [ "$ok" -eq 1 ]; then
+    cp "$AGENT" "$WORK/signed-a"
+    cp "$AGENT" "$WORK/signed-b"
+    cp "$AGENT" "$WORK/adhoc"
+    codesign -f -s "Fleet E2E Signing" --keychain "$KC" "$WORK/signed-a" >/dev/null 2>&1
+    check "self-signed code signing works" $?
+    codesign --verify --strict "$WORK/signed-a" >/dev/null 2>&1
+    check "signature verifies" $?
+
+    # Re-signing identical content with the same identity must not change the
+    # identity the system records.
+    codesign -f -s "Fleet E2E Signing" --keychain "$KC" "$WORK/signed-b" >/dev/null 2>&1
+    H1=$(codesign -dv --verbose=4 "$WORK/signed-a" 2>&1 | sed -n 's/^CDHash=//p')
+    H2=$(codesign -dv --verbose=4 "$WORK/signed-b" 2>&1 | sed -n 's/^CDHash=//p')
+    [ -n "$H1" ] && [ "$H1" = "$H2" ]
+    check "same identity keeps the same code directory hash" $? "$H1 vs $H2"
+
+    codesign -f -s - "$WORK/adhoc" >/dev/null 2>&1
+    H3=$(codesign -dv --verbose=4 "$WORK/adhoc" 2>&1 | sed -n 's/^CDHash=//p')
+    [ -n "$H3" ] && [ "$H3" != "$H1" ]
+    check "ad-hoc signing produces a different identity" $? "$H3"
+
+    # The designated requirement is what TCC keys grants to.
+    DR_SIGNED=$(codesign -d -r- "$WORK/signed-a" 2>&1)
+    DR_ADHOC=$(codesign -d -r- "$WORK/adhoc" 2>&1)
+    case "$DR_ADHOC" in *cdhash*) pass "ad-hoc requirement is keyed to the cdhash (grants die on rebuild)";; *) fail "ad-hoc requirement is keyed to the cdhash - $DR_ADHOC";; esac
+    case "$DR_SIGNED" in *cdhash*) fail "cert-signed requirement should not be cdhash-based - $DR_SIGNED";; *) pass "cert-signed requirement is not cdhash-based (stable across rebuilds)";; esac
+  else
+    note "could not create a self-signed identity here; skipping signing checks"
+  fi
+  security delete-keychain "$KC" >/dev/null 2>&1
+  note "SIP: $(csrutil status 2>/dev/null | tr -s ' ')"
+else
+  note "codesign/openssl not available; skipping signing checks"
 fi
 
 # --- summary ---------------------------------------------------------------

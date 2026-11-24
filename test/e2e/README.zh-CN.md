@@ -56,7 +56,10 @@ sudo env SERVER=http://127.0.0.1:8080 ADMIN_TOKEN=... \
   一致（证明没有任何东西尝试写它）
 - 第二轮不产生任何变化：generation 相同、文件 mtime 相同
 - 服务 / launchd 任务能安装、运行、干净卸载（正是这一项抓到了 agent 缺少
-  `StartServiceCtrlDispatcher`、即错误 1053 的问题）
+  `StartServiceCtrlDispatcher`、即错误 1053 的问题），并且重复安装是幂等的
+- macOS：**代码身份稳定** —— 证书签名的二进制在重建后保持相同的 code directory
+  hash 与相同的 designated requirement，而临时签名则绑定到 cdhash。这正是 TCC
+  授权所绑定的属性，也是装机清单坚持"一个稳定签名身份"的原因
 - **不许说谎**：任何模块报 `changed`/`compliant` 时，可观测的效果必须真实存在
 
 `verify.sh` 刻意不依赖 `python3`/`jq`：裸装的 macOS 虚机两者都没有。
@@ -111,6 +114,13 @@ test/e2e/vm/macos/run.sh             # 此后全自动
 
 **许可提醒：** Apple 只允许在 Apple 硬件上虚拟化 macOS。不要把这一层放进 CI；
 请改用真实 Mac 或 Apple 托管的 runner。
+
+## 托管的 macOS runner 究竟是什么
+
+`macos-latest` 是真正的 Apple Silicon 硬件（日志会打印类似 `macOS 26.7.2 arm64`），
+每个 job 都是全新镜像 —— 因此第 2 层跑的是真实 macOS 上的从零配置，只是这个系统
+不是我们安装的。它给不了的是：重启、图形登录会话（因此没有 TCC 弹窗，也没有
+`launchctl gui/<uid>` 域）、以及嵌套虚拟化 —— 所以第 3 层无法在它内部运行。
 
 ## 为什么不把 macOS 虚机放进 CI
 

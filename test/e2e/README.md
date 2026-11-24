@@ -57,7 +57,12 @@ What they check (all against the live OS, no mocks):
   is byte-identical before and after (proving nothing tried to write it)
 - a second cycle changes nothing: same generation, same file mtime
 - the service/launchd job installs, runs, and uninstalls cleanly (this is what
-  caught the agent missing `StartServiceCtrlDispatcher`, i.e. error 1053)
+  caught the agent missing `StartServiceCtrlDispatcher`, i.e. error 1053), and
+  installing twice is idempotent
+- macOS: **code identity is stable** — a cert-signed binary keeps the same code
+  directory hash and the same designated requirement across rebuilds, while an
+  ad-hoc signature is keyed to its cdhash. This is the property TCC grants bind
+  to, and the reason `docs/provisioning.md` insists on one stable identity
 - **no lying**: whenever a module reports `changed`/`compliant`, the observable
   effect must exist on disk
 
@@ -114,6 +119,15 @@ passwordless sudo (throwaway VM only).
 
 **Licensing:** Apple only permits macOS virtualisation on Apple hardware. Do not
 put this in CI; use a real Mac or an Apple-hosted runner instead.
+
+## What the hosted macOS runner is (and is not)
+
+`macos-latest` is genuine Apple silicon hardware (the log prints e.g.
+`macOS 26.7.2 arm64`), freshly imaged for every job — so tier 2 there is a real
+macOS install driven from scratch, just not one *we* installed. What it cannot
+give you: a reboot, a GUI login session (so no TCC prompts and no
+`launchctl gui/<uid>` domain), or nested virtualisation, so tier 3 cannot run
+inside it.
 
 ## Why not macOS VMs in CI
 
