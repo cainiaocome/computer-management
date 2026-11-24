@@ -7,6 +7,9 @@
 # gets the com.apple.quarantine attribute, so Gatekeeper does not block it.
 set -euo pipefail
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
+REPO="$(dirname "$HERE")"
+
 BIN=""
 SERVER=""
 TOKEN=""
@@ -39,13 +42,13 @@ case "$(uname -s)" in
     # binary with a differently-signed build, macOS will re-prompt for
     # App Management / Full Disk Access. Keep one stable signing identity.
     xattr -d com.apple.quarantine /usr/local/bin/fleet-agent 2>/dev/null || true
-    install -m 0644 deploy/launchd/com.fleet.agent.plist /Library/LaunchDaemons/com.fleet.agent.plist
+    install -m 0644 "$REPO/deploy/launchd/com.fleet.agent.plist" /Library/LaunchDaemons/com.fleet.agent.plist
     chown root:wheel /Library/LaunchDaemons/com.fleet.agent.plist
     launchctl bootout system/com.fleet.agent 2>/dev/null || true
     launchctl bootstrap system /Library/LaunchDaemons/com.fleet.agent.plist
     ;;
   Linux)
-    install -m 0644 deploy/systemd/fleet-agent.service /etc/systemd/system/fleet-agent.service
+    install -m 0644 "$REPO/deploy/systemd/fleet-agent.service" /etc/systemd/system/fleet-agent.service
     systemctl daemon-reload
     systemctl enable --now fleet-agent.service
     ;;
