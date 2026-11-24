@@ -147,6 +147,24 @@ test/e2e/         三层端到端测试（逻辑 / 真实系统 / 真实虚机�
 docs/             设计、平台细节、装机清单（均有中文版）
 ```
 
+## 发布
+
+三种入口，走同一套关卡：`go vet`、单元测试、逻辑端到端测试、两个二进制的六平台
+交叉编译，以及校验和生成。
+
+| 方式 | 触发 |
+|---|---|
+| **推送标签** | `git tag v0.2.0 && git push origin v0.2.0` |
+| **从 main 自动** | 提交信息包含 `[release]` 并推送到 `main` |
+| **手动** | Actions → *Release* → *Run workflow*（`version` 留空则自动递增） |
+
+手动运行支持 `version`、`prerelease`、`draft`、`dry_run`。version 留空时会基于最新
+标签计算下一个版本号：该标签之后若有 `feat:` 提交则递增 minor，否则递增 patch。
+
+每次发布都会附上六个平台的 `fleet-agent-<os>-<arch>`、同样六个平台的
+`fleet-server-<os>-<arch>`，以及 `SHA256SUMS`。最后一个 job 会把发布出去的产物
+重新下载回来，校验与构建产物逐字节一致、校验和正确，并实际执行 linux 二进制。
+
 ## 开发
 
 ```bash

@@ -44,14 +44,21 @@ clean: ## remove build output
 run-server: ## run the server locally (admin token from FLEET_ADMIN_TOKEN)
 	go run ./cmd/server -addr $${FLEET_ADDR:-:8080} -db $${FLEET_DB:-fleet.db}
 
-cross: ## cross-compile the agent for every supported platform into dist/
+cross: ## cross-compile agent and server for every supported platform into dist/
 	@mkdir -p dist
 	@for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; ext=""; \
 		[ "$$os" = "windows" ] && ext=".exe"; \
-		echo "building $$os/$$arch"; \
+		echo "building fleet-agent $$os/$$arch"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build $(GOFLAGS) -ldflags '$(LDFLAGS)' \
 			-o dist/fleet-agent-$$os-$$arch$$ext ./cmd/agent || exit 1; \
+	done
+	@for p in $(PLATFORMS); do \
+		os=$${p%/*}; arch=$${p#*/}; ext=""; \
+		[ "$$os" = "windows" ] && ext=".exe"; \
+		echo "building fleet-server $$os/$$arch"; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build $(GOFLAGS) -ldflags '$(LDFLAGS)' \
+			-o dist/fleet-server-$$os-$$arch$$ext ./cmd/server || exit 1; \
 	done
 
 e2e: ## tier 1: logical end-to-end against a live local server

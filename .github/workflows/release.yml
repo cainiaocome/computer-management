@@ -1,56 +1,292 @@
 name: release
 
+# Three ways to cut a release:
+#
+#   1. Automatically, by pushing a tag:      git tag v0.2.0 && git push origin v0.2.0
+#   2. Automatically, from main, when the   git commit -m "feat: x [release]"
+#      head commit is marked [release]       (version is bumped for you)
+#   3. By hand, from the Actions tab:       Release -> Run workflow
+#      (leave "version" empty to auto-bump from the latest tag)
+#
+# Everything below runs the same gates: vet, unit tests, the logical end-to-end
+# test, then a cross-compile of both binaries for six platforms. A release is
+# only published if all of that passes, and the published artefacts are then
+# downloaded again and verified.
+
 on:
   push:
     tags: ['v*']
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. v0.2.0. Leave empty to auto-bump from the latest tag.'
+        required: false
+        type: string
+      prerelease:
+        description: 'Mark as a pre-release'
+        required: false
+        default: false
+        type: boolean
+      draft:
+        description: 'Create as a draft (not visible until published)'
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: 'Build and verify only; do not create a release'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
-  release:
+  prepare:
+    name: decide version
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+      version: ${{ steps.decide.outputs.version }}
+      prerelease: ${{ steps.decide.outputs.prerelease }}
+      draft: ${{ steps.decide.outputs.draft }}
+      dry_run: ${{ steps.decide.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags and history are needed to compute the next version
+
+      - name: decide
+        id: decide
+        shell: bash
+        env:
+          IN_VERSION: ${{ inputs.version }}
+          IN_PRERELEASE: ${{ inputs.prerelease }}
+          IN_DRAFT: ${{ inputs.draft }}
+          IN_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
+
+          next_version() {
+            local latest base major minor patch
+            latest=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
+            if [ -z "$latest" ]; then
+              echo "v0.1.0"
+              return
+            fi
+            base=${latest#v}
+            base=${base%%-*}          # strip -rc1 etc.
+            major=${base%%.*}
+            rest=${base#*.}
+            minor=${rest%%.*}
+            patch=${rest#*.}
+            # A feature commit bumps the minor, anything else the patch.
+            if git log "$latest..HEAD" --pretty=%s | grep -qE '^feat(\(.+\))?!?:'; then
+              minor=$((minor + 1))
+              patch=0
+            else
+              patch=$((patch + 1))
+            fi
+            echo "v${major}.${minor}.${patch}"
+          }
+
+          release=false
+          version=""
+          prerelease="${IN_PRERELEASE:-false}"
+          draft="${IN_DRAFT:-false}"
+          dry_run="${IN_DRY_RUN:-false}"
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME}"
+            release=true
+            echo "tag push: releasing $version"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            release=true
+            version="${IN_VERSION:-}"
+            if [ -z "$version" ]; then
+              version=$(next_version)
+              echo "manual run without a version: computed $version"
+            fi
+          else
+            # Push to main: opt in with [release] in the head commit message.
+            if git log -1 --pretty=%B | grep -qF '[release]'; then
+              release=true
+              version=$(next_version)
+              echo "head commit is marked [release]: computed $version"
+            else
+              echo "push to main without a [release] marker; nothing to do"
+            fi
+          fi
+
+          if [ "$release" = "true" ]; then
+            if ! printf '%s' "$version" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+              echo "::error::'$version' is not a valid version (expected vMAJOR.MINOR.PATCH[-pre])"
+              exit 1
+            fi
+            if [ "${GITHUB_REF_TYPE}" != "tag" ] && git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+              echo "::error::tag $version already exists; pick another version"
+              exit 1
+            fi
+            {
+              echo "### release $version"
+              echo
+              echo '```'
+              git log -1 --pretty='%h %s'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          emit release "$release"
+          emit version "$version"
+          emit prerelease "$prerelease"
+          emit draft "$draft"
+          emit dry_run "$dry_run"
+
+  build:
+    name: build and verify
+    needs: prepare
+    if: needs.prepare.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # git describe needs tags for the version string
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: test before releasing
+      - name: vet and unit tests
         run: |
           go vet ./...
           go test ./... -count=1
-          bash scripts/e2e.sh
 
-      - name: build agent (all platforms)
-        run: make cross VERSION="${GITHUB_REF_NAME}"
+      - name: logical end-to-end
+        run: bash scripts/e2e.sh
 
-      - name: build server
-        run: |
-          mkdir -p dist
-          for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
-              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
-              -o "dist/fleet-server-linux-$arch" ./cmd/server
-          done
+      - name: cross-compile
+        run: make cross VERSION="${{ needs.prepare.outputs.version }}"
 
       - name: checksums
-        run: cd dist && sha256sum * > SHA256SUMS
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat SHA256SUMS >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: publish
+      - name: smoke the linux build
+        run: |
+          ./dist/fleet-agent-linux-amd64 version
+          ./dist/fleet-agent-linux-amd64 -h 2>&1 | head -3
+          ./dist/fleet-server-linux-amd64 -h 2>&1 | head -3 || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish
+    needs: [prepare, build]
+    if: |
+      needs.prepare.outputs.release == 'true' &&
+      needs.prepare.outputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: create the release
         uses: softprops/action-gh-release@v2
         with:
+          # For a manual run this creates the tag at the tested commit.
+          tag_name: ${{ needs.prepare.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ needs.prepare.outputs.version }}
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
+          draft: ${{ needs.prepare.outputs.draft == 'true' }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             dist/fleet-agent-*
             dist/fleet-server-*
             dist/SHA256SUMS
-          generate_release_notes: true
           body: |
-            Binaries are unsigned. Distribute the agent with `curl`/`ssh` (not a
-            browser download) so macOS Gatekeeper never sees a quarantine flag,
-            and see `docs/provisioning.md` for the free stable-signing recipe.
+            Cross-built from `${{ github.sha }}`.
+
+            | file | what |
+            |---|---|
+            | `fleet-agent-<os>-<arch>` | the agent (run as root/SYSTEM) |
+            | `fleet-server-<os>-<arch>` | the control plane |
+            | `SHA256SUMS` | verify with `sha256sum -c SHA256SUMS` |
+
+            Quick start:
+
+            ```bash
+            # control plane
+            FLEET_ADMIN_TOKEN=$(openssl rand -hex 24) ./fleet-server-linux-amd64 -addr :8080
+            # on a managed machine (no browser download, so macOS never sets quarantine)
+            curl -fsSLO https://github.com/${{ github.repository }}/releases/download/${{ needs.prepare.outputs.version }}/fleet-agent-darwin-arm64
+            sudo install -m 0755 fleet-agent-darwin-arm64 /usr/local/bin/fleet-agent
+            sudo fleet-agent enroll -server https://fleet.example.com -token <TOKEN>
+            ```
+
+            **Binaries are unsigned.** Install the agent with `curl`/`ssh` rather
+            than a browser download so Gatekeeper never sees a quarantine flag, or
+            follow the free self-signed-CA recipe in `docs/provisioning.md`.
+            Nothing here needs an Apple Developer Program or a code signing
+            certificate.
+
+  verify-release:
+    name: verify the published release
+    needs: [prepare, publish]
+    if: |
+      needs.prepare.outputs.release == 'true' &&
+      needs.prepare.outputs.draft != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: local
+
+      - name: download it back from the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p remote
+          gh release download "${{ needs.prepare.outputs.version }}" \
+            --repo "${{ github.repository }}" --dir remote --pattern '*'
+          ls -l remote
+
+      - name: compare and run
+        run: |
+          set -euo pipefail
+          cd remote
+          # Same bytes were published as were built.
+          for f in *; do
+            cmp "$f" "../local/$f" || { echo "::error::$f differs from the built artefact"; exit 1; }
+          done
+          # The checksums describe the files that are actually attached.
+          sha256sum -c SHA256SUMS
+          # The linux binaries really execute.
+          chmod +x fleet-agent-linux-amd64 fleet-server-linux-amd64
+          ./fleet-agent-linux-amd64 version
+          ./fleet-server-linux-amd64 -h >/dev/null 2>&1 || true

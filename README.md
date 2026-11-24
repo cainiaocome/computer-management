@@ -151,6 +151,27 @@ scripts/          install + end-to-end test
 docs/             design, provisioning
 ```
 
+## Releasing
+
+Three ways in, all running the same gates: `go vet`, unit tests, the logical
+end-to-end test, a six-platform cross-compile of both binaries, then a
+checksum pass.
+
+| How | Trigger |
+|---|---|
+| **Tag push** | `git tag v0.2.0 && git push origin v0.2.0` |
+| **From main, opt-in** | a commit whose message contains `[release]`, pushed to `main` |
+| **Manually** | Actions → *Release* → *Run workflow* (leave `version` empty to auto-bump) |
+
+The manual run takes `version`, `prerelease`, `draft` and `dry_run`. With an empty
+version the next number is computed from the latest tag: a `feat:` commit since
+that tag bumps the minor, anything else bumps the patch.
+
+Every release attaches `fleet-agent-<os>-<arch>` for six platforms,
+`fleet-server-<os>-<arch>` for the same six, and `SHA256SUMS`. A final job then
+downloads the published release, verifies byte-identity against what was built,
+checks the checksums, and executes the linux binaries.
+
 ## Development
 
 ```bash
