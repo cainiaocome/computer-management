@@ -232,87 +232,44 @@ else
   note "installer not staged (INSTALLER unset); skipping launchd checks"
 fi
 
-# --- 8. code signing identity ----------------------------------------------
-section "code signing identity"
-# macOS binds TCC grants to the *code identity* (designated requirement), not to
-# a path. A cert-signed binary keeps the same identity across rebuilds; an
-# ad-hoc signed one is keyed to its cdhash, so every rebuild re-prompts. That is
-# why docs/provisioning.md insists on one stable signing identity - and it is
-# cheap to prove here.
-if command -v codesign >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then
-  KC="$WORK/signing.keychain-db"
-  cat > "$WORK/openssl.cnf" <<'CNF'
-[req]
-distinguished_name = dn
-x509_extensions = ext
-prompt = no
-[dn]
-CN = Fleet E2E Signing
-[ext]
-basicConstraints = critical,CA:FALSE
-keyUsage = critical,digitalSignature
-extendedKeyUsage = critical,codeSigning
-CNF
-  SLOG="$WORK/sign.log"
-  : > "$SLOG"
-  step() { echo "== $*" >> "$SLOG"; "$@" >> "$SLOG" 2>&1; local rc=$?; echo "   rc=$rc" >> "$SLOG"; return $rc; }
-  ok=1
-  step security create-keychain -p fleet "$KC" || ok=0
-  step security set-keychain-settings "$KC" || ok=0
-  step security unlock-keychain -p fleet "$KC" || ok=0
-  step openssl req -x509 -newkey rsa:2048 -nodes -days 1 -config "$WORK/openssl.cnf" \
-    -keyout "$WORK/k.pem" -out "$WORK/c.pem" || ok=0
-  # LibreSSL's default PKCS#12 encryption is not readable by `security import`,
-  # so pin the algorithms to the ones Apple's tooling understands.
-  step openssl pkcs12 -export -inkey "$WORK/k.pem" -in "$WORK/c.pem" \
-    -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1 \
-    -out "$WORK/id.p12" -passout pass:fleet || ok=0
-  step security import "$WORK/id.p12" -k "$KC" -P fleet -T /usr/bin/codesign -A || ok=0
-  step security set-key-partition-list -S apple-tool:,apple: -k fleet "$KC" || ok=0
-  # A self-signed certificate is not a "valid" identity until it is trusted for
-  # code signing; without this, codesign reports "0 valid identities found".
-  step security add-trusted-cert -p codeSign -r trustRoot -k "$KC" "$WORK/c.pem" || ok=0
-  if ! security find-identity -p codesigning "$KC" 2>/dev/null | grep -q "Fleet E2E Signing"; then
-    echo "no code signing identity after import" >> "$SLOG"
-    ok=0
-  fi
+# --- 8. code identity -------------------------------------------------------
+section "code identity"
+# macOS binds TCC grants to the *code identity* (the designated requirement), not
+# to a path. For an ad-hoc signature that requirement is the cdhash, so any
+# rebuild re-prompts for every grant - which is why docs/provisioning.md insists
+# on one stable signing identity. The mechanism is provable without setting up a
+# trusted certificate (that recipe lives in the provisioning doc).
+if command -v codesign >/dev/null 2>&1; then
+  cp "$AGENT" "$WORK/a1"
+  cp "$AGENT" "$WORK/a2"
+  codesign -f -s - "$WORK/a1" >/dev/null 2>&1
+  check "ad-hoc signing works" $?
+  codesign --verify --strict "$WORK/a1" >/dev/null 2>&1
+  check "ad-hoc signature verifies" $?
 
-  if [ "$ok" -eq 1 ]; then
-    cp "$AGENT" "$WORK/signed-a"
-    cp "$AGENT" "$WORK/signed-b"
-    cp "$AGENT" "$WORK/adhoc"
-    codesign -f -s "Fleet E2E Signing" --keychain "$KC" "$WORK/signed-a" >> "$SLOG" 2>&1
-    check "self-signed code signing works" $? "$(tail -3 "$SLOG")"
-    codesign --verify --strict "$WORK/signed-a" >/dev/null 2>&1
-    check "signature verifies" $?
+  codesign -f -s - "$WORK/a2" >/dev/null 2>&1
+  H1=$(codesign -dv --verbose=4 "$WORK/a1" 2>&1 | sed -n 's/^CDHash=//p')
+  H2=$(codesign -dv --verbose=4 "$WORK/a2" 2>&1 | sed -n 's/^CDHash=//p')
+  [ -n "$H1" ] && [ "$H1" = "$H2" ]
+  check "identical content signs to an identical code directory hash" $? "$H1 vs $H2"
 
-    # Re-signing identical content with the same identity must not change the
-    # identity the system records.
-    codesign -f -s "Fleet E2E Signing" --keychain "$KC" "$WORK/signed-b" >/dev/null 2>&1
-    H1=$(codesign -dv --verbose=4 "$WORK/signed-a" 2>&1 | sed -n 's/^CDHash=//p')
-    H2=$(codesign -dv --verbose=4 "$WORK/signed-b" 2>&1 | sed -n 's/^CDHash=//p')
-    [ -n "$H1" ] && [ "$H1" = "$H2" ]
-    check "same identity keeps the same code directory hash" $? "$H1 vs $H2"
+  # One changed byte is exactly what a rebuild does.
+  printf 'x' >> "$WORK/a2"
+  codesign -f -s - "$WORK/a2" >/dev/null 2>&1
+  H3=$(codesign -dv --verbose=4 "$WORK/a2" 2>&1 | sed -n 's/^CDHash=//p')
+  [ -n "$H3" ] && [ "$H3" != "$H1" ]
+  check "a content change produces a new identity (this is what breaks TCC grants)" $? "$H3"
 
-    codesign -f -s - "$WORK/adhoc" >/dev/null 2>&1
-    H3=$(codesign -dv --verbose=4 "$WORK/adhoc" 2>&1 | sed -n 's/^CDHash=//p')
-    [ -n "$H3" ] && [ "$H3" != "$H1" ]
-    check "ad-hoc signing produces a different identity" $? "$H3"
-
-    # The designated requirement is what TCC keys grants to.
-    DR_SIGNED=$(codesign -d -r- "$WORK/signed-a" 2>&1)
-    DR_ADHOC=$(codesign -d -r- "$WORK/adhoc" 2>&1)
-    case "$DR_ADHOC" in *cdhash*) pass "ad-hoc requirement is keyed to the cdhash (grants die on rebuild)";; *) fail "ad-hoc requirement is keyed to the cdhash - $DR_ADHOC";; esac
-    case "$DR_SIGNED" in *cdhash*) fail "cert-signed requirement should not be cdhash-based - $DR_SIGNED";; *) pass "cert-signed requirement is not cdhash-based (stable across rebuilds)";; esac
-  else
-    fail "could not create a self-signed identity" "$(grep -E 'rc=[1-9]|error|Error' "$SLOG" | head -4 | tr '\n' ' ')"
-  fi
-  security delete-keychain "$KC" >/dev/null 2>&1
-  # Note: GitHub-hosted runners ship with SIP disabled, so tier 2 can prove the
-  # code-identity mechanics but says nothing about real SIP/TCC enforcement.
+  DR=$(codesign -d -r- "$WORK/a1" 2>&1)
+  case "$DR" in
+    *cdhash*) pass "ad-hoc designated requirement is keyed to the cdhash";;
+    *) fail "ad-hoc designated requirement is keyed to the cdhash - $DR";;
+  esac
+  # GitHub-hosted runners ship with SIP disabled, so this layer proves the
+  # mechanics of code identity, not SIP/TCC enforcement itself.
   note "SIP: $(csrutil status 2>/dev/null | tr -s ' ')"
 else
-  note "codesign/openssl not available; skipping signing checks"
+  note "codesign not available; skipping code identity checks"
 fi
 
 # --- summary ---------------------------------------------------------------

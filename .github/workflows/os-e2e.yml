@@ -25,6 +25,9 @@ jobs:
   suite:
     name: real ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    # A hung native tool (codesign, launchctl, security) must fail the job in
+    # minutes, not burn the runner for the 6h default.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
