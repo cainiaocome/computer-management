@@ -253,21 +253,30 @@ basicConstraints = critical,CA:FALSE
 keyUsage = critical,digitalSignature
 extendedKeyUsage = critical,codeSigning
 CNF
+  SLOG="$WORK/sign.log"
+  : > "$SLOG"
+  step() { echo "== $*" >> "$SLOG"; "$@" >> "$SLOG" 2>&1; local rc=$?; echo "   rc=$rc" >> "$SLOG"; return $rc; }
   ok=1
-  security create-keychain -p fleet "$KC" >/dev/null 2>&1 || ok=0
-  security set-keychain-settings "$KC" >/dev/null 2>&1
-  security unlock-keychain -p fleet "$KC" >/dev/null 2>&1 || ok=0
-  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -config "$WORK/openssl.cnf"     -keyout "$WORK/k.pem" -out "$WORK/c.pem" >/dev/null 2>&1 || ok=0
-  openssl pkcs12 -export -inkey "$WORK/k.pem" -in "$WORK/c.pem"     -out "$WORK/id.p12" -passout pass:fleet >/dev/null 2>&1 || ok=0
-  security import "$WORK/id.p12" -k "$KC" -P fleet -T /usr/bin/codesign >/dev/null 2>&1 || ok=0
-  security set-key-partition-list -S apple-tool:,apple: -k fleet "$KC" >/dev/null 2>&1
+  step security create-keychain -p fleet "$KC" || ok=0
+  step security set-keychain-settings "$KC" || ok=0
+  step security unlock-keychain -p fleet "$KC" || ok=0
+  step openssl req -x509 -newkey rsa:2048 -nodes -days 1 -config "$WORK/openssl.cnf" \
+    -keyout "$WORK/k.pem" -out "$WORK/c.pem" || ok=0
+  # LibreSSL's default PKCS#12 encryption is not readable by `security import`,
+  # so pin the algorithms to the ones Apple's tooling understands.
+  step openssl pkcs12 -export -inkey "$WORK/k.pem" -in "$WORK/c.pem" \
+    -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1 \
+    -out "$WORK/id.p12" -passout pass:fleet || ok=0
+  step security import "$WORK/id.p12" -k "$KC" -P fleet -T /usr/bin/codesign -A || ok=0
+  step security set-key-partition-list -S apple-tool:,apple: -k fleet "$KC" || ok=0
+  step security find-identity -v -p codesigning "$KC" || ok=0
 
   if [ "$ok" -eq 1 ]; then
     cp "$AGENT" "$WORK/signed-a"
     cp "$AGENT" "$WORK/signed-b"
     cp "$AGENT" "$WORK/adhoc"
-    codesign -f -s "Fleet E2E Signing" --keychain "$KC" "$WORK/signed-a" >/dev/null 2>&1
-    check "self-signed code signing works" $?
+    codesign -f -s "Fleet E2E Signing" --keychain "$KC" "$WORK/signed-a" >> "$SLOG" 2>&1
+    check "self-signed code signing works" $? "$(tail -3 "$SLOG")"
     codesign --verify --strict "$WORK/signed-a" >/dev/null 2>&1
     check "signature verifies" $?
 
@@ -290,9 +299,11 @@ CNF
     case "$DR_ADHOC" in *cdhash*) pass "ad-hoc requirement is keyed to the cdhash (grants die on rebuild)";; *) fail "ad-hoc requirement is keyed to the cdhash - $DR_ADHOC";; esac
     case "$DR_SIGNED" in *cdhash*) fail "cert-signed requirement should not be cdhash-based - $DR_SIGNED";; *) pass "cert-signed requirement is not cdhash-based (stable across rebuilds)";; esac
   else
-    note "could not create a self-signed identity here; skipping signing checks"
+    fail "could not create a self-signed identity" "$(grep -E 'rc=[1-9]|error|Error' "$SLOG" | head -4 | tr '\n' ' ')"
   fi
   security delete-keychain "$KC" >/dev/null 2>&1
+  # Note: GitHub-hosted runners ship with SIP disabled, so tier 2 can prove the
+  # code-identity mechanics but says nothing about real SIP/TCC enforcement.
   note "SIP: $(csrutil status 2>/dev/null | tr -s ' ')"
 else
   note "codesign/openssl not available; skipping signing checks"
