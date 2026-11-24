@@ -19,7 +19,7 @@ func fileItem(t *testing.T, cfg string) protocol.Item {
 
 func TestFileApplyLifecycle(t *testing.T) {
 	root := t.TempDir()
-	e := testEnv("linux", root, &fakeRunner{})
+	e := testEnv(runtime.GOOS, root, &fakeRunner{})
 	item := fileItem(t, `{"path":"/etc/fleet/hello.conf","content":"a=1\n","mode":"0640"}`)
 
 	out := File{}.Apply(ctxWith(e), item)
@@ -56,7 +56,7 @@ func TestFileApplyLifecycle(t *testing.T) {
 
 func TestFileEnsureAbsent(t *testing.T) {
 	root := t.TempDir()
-	e := testEnv("linux", root, &fakeRunner{})
+	e := testEnv(runtime.GOOS, root, &fakeRunner{})
 	write := fileItem(t, `{"path":"/tmp/f","content":"x"}`)
 	File{}.Apply(ctxWith(e), write)
 
@@ -70,7 +70,7 @@ func TestFileEnsureAbsent(t *testing.T) {
 }
 
 func TestFileRejectsBadMode(t *testing.T) {
-	e := testEnv("linux", t.TempDir(), &fakeRunner{})
+	e := testEnv(runtime.GOOS, t.TempDir(), &fakeRunner{})
 	out := File{}.Apply(ctxWith(e), fileItem(t, `{"path":"/tmp/x","content":"","mode":"nope"}`))
 	if out.Status != protocol.StatusError {
 		t.Fatalf("want error, got %s", out.Status)
