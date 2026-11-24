@@ -269,7 +269,13 @@ CNF
     -out "$WORK/id.p12" -passout pass:fleet || ok=0
   step security import "$WORK/id.p12" -k "$KC" -P fleet -T /usr/bin/codesign -A || ok=0
   step security set-key-partition-list -S apple-tool:,apple: -k fleet "$KC" || ok=0
-  step security find-identity -v -p codesigning "$KC" || ok=0
+  # A self-signed certificate is not a "valid" identity until it is trusted for
+  # code signing; without this, codesign reports "0 valid identities found".
+  step security add-trusted-cert -p codeSign -r trustRoot -k "$KC" "$WORK/c.pem" || ok=0
+  if ! security find-identity -p codesigning "$KC" 2>/dev/null | grep -q "Fleet E2E Signing"; then
+    echo "no code signing identity after import" >> "$SLOG"
+    ok=0
+  fi
 
   if [ "$ok" -eq 1 ]; then
     cp "$AGENT" "$WORK/signed-a"
