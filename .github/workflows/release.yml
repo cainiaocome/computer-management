@@ -1,0 +1,56 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git describe needs tags for the version string
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: test before releasing
+        run: |
+          go vet ./...
+          go test ./... -count=1
+          bash scripts/e2e.sh
+
+      - name: build agent (all platforms)
+        run: make cross VERSION="${GITHUB_REF_NAME}"
+
+      - name: build server
+        run: |
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+              -o "dist/fleet-server-linux-$arch" ./cmd/server
+          done
+
+      - name: checksums
+        run: cd dist && sha256sum * > SHA256SUMS
+
+      - name: publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/fleet-agent-*
+            dist/fleet-server-*
+            dist/SHA256SUMS
+          generate_release_notes: true
+          body: |
+            Binaries are unsigned. Distribute the agent with `curl`/`ssh` (not a
+            browser download) so macOS Gatekeeper never sees a quarantine flag,
+            and see `docs/provisioning.md` for the free stable-signing recipe.

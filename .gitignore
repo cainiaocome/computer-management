@@ -1,0 +1,11 @@
+tmp/
+markdown-for-ai/
+claude-code-review-result/
+reference-repos/
+bin/
+dist/
+*.db
+*.db-shm
+*.db-wal
+*.key
+.DS_Store

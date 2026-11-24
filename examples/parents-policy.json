@@ -1,0 +1,75 @@
+{
+  "policies": [
+    {
+      "id": "firefox/base",
+      "type": "firefox.policy",
+      "class": "enforce",
+      "enabled": true,
+      "config": {
+        "homepage": "https://duckduckgo.com",
+        "block_other_extensions": true,
+        "blocked_install_message": "This browser is managed. Only your administrator can install extensions.",
+        "extensions": [
+          {
+            "id": "uBlock0@raymondhill.net",
+            "url": "https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi"
+          },
+          {
+            "id": "@testpilot-containers",
+            "url": "https://addons.mozilla.org/firefox/downloads/latest/multi-account-containers/latest.xpi"
+          }
+        ],
+        "preferences": {
+          "browser.newtabpage.enabled": false,
+          "browser.startup.page": 3,
+          "datareporting.healthreport.uploadEnabled": false,
+          "toolkit.telemetry.enabled": false
+        }
+      }
+    },
+    {
+      "id": "packages/base",
+      "type": "packages",
+      "class": "enforce",
+      "enabled": true,
+      "config": {
+        "manager": "auto",
+        "install": [
+          { "name": "firefox" }
+        ]
+      }
+    },
+    {
+      "id": "browser/default",
+      "type": "browser.default",
+      "class": "nudge",
+      "enabled": true,
+      "config": { "browser": "firefox" }
+    },
+    {
+      "id": "daily-user",
+      "type": "user.account",
+      "class": "enforce",
+      "enabled": true,
+      "config": {
+        "username": "mom",
+        "ensure_standard": true,
+        "demote": false
+      }
+    },
+    {
+      "id": "macos-consent",
+      "type": "macos.consent",
+      "class": "bootstrap_once",
+      "enabled": true,
+      "config": { "require": ["app_management"] }
+    },
+    {
+      "id": "inventory",
+      "type": "inventory",
+      "class": "report_only",
+      "enabled": true,
+      "config": {}
+    }
+  ]
+}

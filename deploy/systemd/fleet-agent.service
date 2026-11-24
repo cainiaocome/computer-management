@@ -1,0 +1,24 @@
+[Unit]
+Description=Fleet device agent
+Documentation=https://github.com/cainiaocome/computer-management
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/fleet-agent run
+Restart=always
+RestartSec=30s
+
+# The agent runs as root because it writes system policy (browser policy files,
+# packages, services). Hardening below is deliberately conservative: tightening
+# it further breaks package managers. See docs/design.md §7 before adding
+# sandboxing directives.
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictRealtime=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target
