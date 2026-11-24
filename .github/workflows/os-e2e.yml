@@ -6,6 +6,10 @@ name: os-e2e
 #
 # The VM tier (test/e2e/vm/*) is not here on purpose: it needs KVM, ~40 GB of
 # disk, and macOS virtualisation is only licensed on Apple hardware.
+#
+# The fleet server is started and stopped inside the SAME step that runs the
+# suite: GitHub Actions tears down the process tree at the end of each step, so
+# a server started in an earlier step is gone by the time the tests run.
 
 on:
   push:
@@ -40,8 +44,8 @@ jobs:
       - name: build
         shell: bash
         # NOTE: `-o bin/` would name the binaries after their *package*
-        # directories (server, agent) and drop the .exe suffix logic on
-        # Windows, so name them explicitly instead.
+        # directories (server, agent) and skip the .exe suffix on Windows,
+        # so name them explicitly instead.
         run: |
           mkdir -p bin
           ext=""
@@ -49,62 +53,71 @@ jobs:
           go build -trimpath -o "bin/fleet-server$ext" ./cmd/server
           go build -trimpath -o "bin/fleet-agent$ext" ./cmd/agent
 
-      - name: start server (windows)
+      - name: suite (windows)
         if: matrix.suite == 'windows'
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $env:FLEET_ADMIN_TOKEN = "e2e-vm-admin-token"
           $exe = Join-Path $PWD 'bin\fleet-server.exe'
           if (-not (Test-Path $exe)) { Get-ChildItem bin; throw "server binary missing: $exe" }
-          $p = Start-Process -FilePath $exe `
-            -ArgumentList '-addr','127.0.0.1:8080','-db',$env:TEMP+'\fleet.db','-key',$env:TEMP+'\k','-log-level','warn' `
-            -PassThru -RedirectStandardError "$env:TEMP\server.log"
-          "SERVER_PID=$($p.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append
-          for ($i = 0; $i -lt 60; $i++) {
-            try { Invoke-RestMethod http://127.0.0.1:8080/healthz | Out-Null; exit 0 } catch { Start-Sleep -Seconds 1 }
-          }
-          Get-Content "$env:TEMP\server.log" -Raw
-          exit 1
 
-      - name: start server (macos)
+          $log = Join-Path $env:RUNNER_TEMP 'server.log'
+          $p = Start-Process -FilePath $exe -PassThru -RedirectStandardError $log `
+            -ArgumentList '-addr','127.0.0.1:8080','-db',(Join-Path $env:RUNNER_TEMP 'fleet.db'),
+                          '-key',(Join-Path $env:RUNNER_TEMP 'fleet.key'),'-log-level','warn'
+
+          $rc = 1
+          try {
+            $up = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              try { Invoke-RestMethod http://127.0.0.1:8080/healthz -TimeoutSec 2 | Out-Null; $up = $true; break }
+              catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $up) { Get-Content $log -Raw; throw "server never became healthy" }
+
+            .\test\e2e\guest\verify.ps1 `
+              -Server http://127.0.0.1:8080 `
+              -AdminToken e2e-vm-admin-token `
+              -Agent .\bin\fleet-agent.exe `
+              -Installer .\scripts\install-windows.ps1
+            $rc = $LASTEXITCODE
+          } finally {
+            Copy-Item C:\fleet-e2e-results.json (Join-Path $env:RUNNER_TEMP 'fleet-e2e-results.json') -ErrorAction SilentlyContinue
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          }
+          exit $rc
+
+      - name: suite (macos)
         if: matrix.suite == 'macos'
         shell: bash
         run: |
-          ./bin/fleet-server -addr 127.0.0.1:8080 -db "$RUNNER_TEMP/fleet.db" \
-            -key "$RUNNER_TEMP/k" -admin-token e2e-vm-admin-token -log-level warn &
+          set -uo pipefail
+          ./bin/fleet-server -addr 127.0.0.1:8080 \
+            -db "$RUNNER_TEMP/fleet.db" -key "$RUNNER_TEMP/fleet.key" \
+            -admin-token e2e-vm-admin-token -log-level warn >"$RUNNER_TEMP/server.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+
+          up=0
           for i in $(seq 1 60); do
-            curl -fsS http://127.0.0.1:8080/healthz >/dev/null && exit 0
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then up=1; break; fi
             sleep 1
           done
-          exit 1
+          if [ "$up" -ne 1 ]; then cat "$RUNNER_TEMP/server.log"; exit 1; fi
 
-      - name: run the suite (windows)
-        if: matrix.suite == 'windows'
-        shell: pwsh
-        run: |
-          .\test\e2e\guest\verify.ps1 `
-            -Server http://127.0.0.1:8080 `
-            -AdminToken e2e-vm-admin-token `
-            -Agent .\bin\fleet-agent.exe `
-            -Installer .\scripts\install-windows.ps1
-          Copy-Item C:\fleet-e2e-results.json "$env:RUNNER_TEMP\fleet-e2e-results.json" -ErrorAction SilentlyContinue
-
-      - name: run the suite (macos)
-        if: matrix.suite == 'macos'
-        shell: bash
-        run: |
           sudo env SERVER=http://127.0.0.1:8080 \
             ADMIN_TOKEN=e2e-vm-admin-token \
             AGENT="$PWD/bin/fleet-agent" \
             INSTALLER="$PWD/scripts/install-unix.sh" \
             bash test/e2e/guest/verify.sh
 
-      - name: upload results
+      - name: upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: os-e2e-${{ matrix.suite }}
           path: |
-            ${{ runner.temp }}/*.log
+            ${{ runner.temp }}/server.log
             ${{ runner.temp }}/fleet-e2e-results.json
           if-no-files-found: ignore
