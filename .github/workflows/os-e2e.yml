@@ -39,9 +39,13 @@ jobs:
 
       - name: build
         shell: bash
+        # `-o bin/` keeps the platform executable suffix (.exe on Windows);
+        # `-o bin/fleet-server` would produce an extensionless file that cannot
+        # be executed there.
         run: |
-          go build -trimpath -o bin/fleet-server ./cmd/server
-          go build -trimpath -o bin/fleet-agent ./cmd/agent
+          mkdir -p bin
+          go build -trimpath -o bin/ ./cmd/server
+          go build -trimpath -o bin/ ./cmd/agent
 
       - name: start server (windows)
         if: matrix.suite == 'windows'
@@ -79,6 +83,7 @@ jobs:
             -AdminToken e2e-vm-admin-token `
             -Agent .\bin\fleet-agent.exe `
             -Installer .\scripts\install-windows.ps1
+          Copy-Item C:\fleet-e2e-results.json "$env:RUNNER_TEMP\fleet-e2e-results.json" -ErrorAction SilentlyContinue
 
       - name: run the suite (macos)
         if: matrix.suite == 'macos'
@@ -96,7 +101,6 @@ jobs:
         with:
           name: os-e2e-${{ matrix.suite }}
           path: |
-            ${{ runner.temp }}/**/*.log
-            C:\fleet-e2e-results.json
-            /tmp/*.log
+            ${{ runner.temp }}/**
+            **/*.log
           if-no-files-found: ignore
