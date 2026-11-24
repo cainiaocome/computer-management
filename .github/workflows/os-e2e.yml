@@ -1,0 +1,102 @@
+name: os-e2e
+
+# Tier 2: the real-OS end-to-end suite. GitHub-hosted runners ARE real Windows and
+# real macOS (on Apple hardware), so this exercises the actual registry, actual
+# local accounts, actual services/launchd and actual /Applications writes.
+#
+# The VM tier (test/e2e/vm/*) is not here on purpose: it needs KVM, ~40 GB of
+# disk, and macOS virtualisation is only licensed on Apple hardware.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: os-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suite:
+    name: real ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            suite: windows
+          - os: macos-latest
+            suite: macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build
+        shell: bash
+        run: |
+          go build -trimpath -o bin/fleet-server ./cmd/server
+          go build -trimpath -o bin/fleet-agent ./cmd/agent
+
+      - name: start server (windows)
+        if: matrix.suite == 'windows'
+        shell: pwsh
+        run: |
+          $env:FLEET_ADMIN_TOKEN = "e2e-vm-admin-token"
+          $p = Start-Process -FilePath ".\bin\fleet-server.exe" `
+            -ArgumentList '-addr','127.0.0.1:8080','-db',$env:TEMP+'\fleet.db','-key',$env:TEMP+'\k','-log-level','warn' `
+            -PassThru -RedirectStandardError "$env:TEMP\server.log"
+          "SERVER_PID=$($p.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          for ($i = 0; $i -lt 60; $i++) {
+            try { Invoke-RestMethod http://127.0.0.1:8080/healthz | Out-Null; exit 0 } catch { Start-Sleep -Seconds 1 }
+          }
+          Get-Content "$env:TEMP\server.log" -Raw
+          exit 1
+
+      - name: start server (macos)
+        if: matrix.suite == 'macos'
+        shell: bash
+        run: |
+          ./bin/fleet-server -addr 127.0.0.1:8080 -db "$RUNNER_TEMP/fleet.db" \
+            -key "$RUNNER_TEMP/k" -admin-token e2e-vm-admin-token -log-level warn &
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8080/healthz >/dev/null && exit 0
+            sleep 1
+          done
+          exit 1
+
+      - name: run the suite (windows)
+        if: matrix.suite == 'windows'
+        shell: pwsh
+        run: |
+          .\test\e2e\guest\verify.ps1 `
+            -Server http://127.0.0.1:8080 `
+            -AdminToken e2e-vm-admin-token `
+            -Agent .\bin\fleet-agent.exe `
+            -Installer .\scripts\install-windows.ps1
+
+      - name: run the suite (macos)
+        if: matrix.suite == 'macos'
+        shell: bash
+        run: |
+          sudo env SERVER=http://127.0.0.1:8080 \
+            ADMIN_TOKEN=e2e-vm-admin-token \
+            AGENT="$PWD/bin/fleet-agent" \
+            INSTALLER="$PWD/scripts/install-unix.sh" \
+            bash test/e2e/guest/verify.sh
+
+      - name: upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: os-e2e-${{ matrix.suite }}
+          path: |
+            ${{ runner.temp }}/**/*.log
+            C:\fleet-e2e-results.json
+            /tmp/*.log
+          if-no-files-found: ignore

@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -26,6 +27,7 @@ func main() {
 	serverURL := flag.String("server", "", "server base URL (enroll only)")
 	token := flag.String("token", "", "enrollment token (enroll only)")
 	dryRun := flag.Bool("dry-run", false, "report what would change without changing anything")
+	jsonOut := flag.Bool("json", false, "print module reports as JSON on stdout (once only)")
 	root := flag.String("root", "", "filesystem root override (testing only)")
 	logLevel := flag.String("log-level", "info", "debug|info|warn|error")
 	flag.Usage = usage
@@ -69,8 +71,17 @@ func main() {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		if cmd == "once" {
-			if err := a.Once(ctx); err != nil {
+			reports, err := a.Once(ctx)
+			if err != nil {
 				fatalf(log, "once: %v", err)
+			}
+			if *jsonOut {
+				b, err := json.Marshal(reports)
+				if err != nil {
+					fatalf(log, "encode reports: %v", err)
+				}
+				fmt.Println(string(b))
+				return
 			}
 			fmt.Println("cycle complete")
 			return

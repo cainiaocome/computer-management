@@ -8,7 +8,7 @@ GOFLAGS := -trimpath
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
 .DEFAULT_GOAL := help
-.PHONY: help build test vet fmt fmt-check tidy clean server agent run-server cross e2e
+.PHONY: help build test vet fmt fmt-check tidy clean server agent run-server cross e2e e2e-os e2e-vm-windows e2e-vm-macos
 
 help: ## show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -54,5 +54,19 @@ cross: ## cross-compile the agent for every supported platform into dist/
 			-o dist/fleet-agent-$$os-$$arch$$ext ./cmd/agent || exit 1; \
 	done
 
-e2e: ## run the end-to-end smoke test against a live local server
+e2e: ## tier 1: logical end-to-end against a live local server
 	bash scripts/e2e.sh
+
+e2e-os: ## tier 2: real-OS suite on this machine (needs sudo/admin; Windows or macOS)
+	@case "$$(uname -s)" in \
+	  Darwin) sudo env SERVER=http://127.0.0.1:8080 ADMIN_TOKEN=$${FLEET_ADMIN_TOKEN:-e2e-vm-admin-token} \
+	            AGENT=$$PWD/bin/fleet-agent INSTALLER=$$PWD/scripts/install-unix.sh \
+	            bash test/e2e/guest/verify.sh ;; \
+	  *) echo "tier 2 runs on macOS or Windows; see test/e2e/README.md" >&2; exit 1 ;; \
+	esac
+
+e2e-vm-windows: ## tier 3: real Windows 11 VM + suite inside it (needs KVM, ~40GB)
+	bash test/e2e/vm/windows/run.sh
+
+e2e-vm-macos: ## tier 3: real macOS VM + suite inside it (see test/e2e/README.md)
+	bash test/e2e/vm/macos/run.sh

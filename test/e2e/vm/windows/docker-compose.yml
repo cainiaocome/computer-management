@@ -1,0 +1,31 @@
+# Real Windows 11 VM for end-to-end tests.
+#
+# Requires a Linux host with /dev/kvm (see test/e2e/README.md for the tier model).
+# First boot downloads and installs Windows unattended (~20-60 min on slow
+# hardware); later boots reuse ./storage and take ~1 minute.
+services:
+  windows:
+    image: dockurr/windows
+    container_name: ${CONTAINER_NAME:-fleet-e2e-windows}
+    environment:
+      VERSION: "${WINDOWS_VERSION:-11}"
+      USERNAME: "${WINDOWS_USER:-Docker}"
+      PASSWORD: "${WINDOWS_PASS:-admin}"
+      RAM_SIZE: "${VM_RAM:-6G}"
+      CPU_CORES: "${VM_CPUS:-4}"
+      DISK_SIZE: "64G"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8006}:8006"
+      - "127.0.0.1:${RDP_PORT:-3389}:3389/tcp"
+      - "127.0.0.1:${SSH_PORT:-2222}:22/tcp"
+    volumes:
+      - ./storage:/storage
+      - ./oem:/oem
+      - ./shared:/shared
+    restart: unless-stopped
+    stop_grace_period: 2m

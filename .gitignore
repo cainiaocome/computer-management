@@ -9,3 +9,10 @@ dist/
 *.db-wal
 *.key
 .DS_Store
+
+# e2e VM harness: generated per-run artefacts
+test/e2e/vm/*/storage/
+test/e2e/vm/*/logs/
+test/e2e/vm/*/shared/
+test/e2e/vm/*/.ssh/
+test/e2e/vm/windows/oem/authorized_keys

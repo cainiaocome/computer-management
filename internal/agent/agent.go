@@ -81,10 +81,11 @@ func (a *Agent) Enroll(ctx context.Context, token string) error {
 	return nil
 }
 
-// Once performs a single check-in / apply / report cycle.
-func (a *Agent) Once(ctx context.Context) error {
+// Once performs a single check-in / apply / report cycle and returns the
+// module reports it sent (nil when there was nothing to apply).
+func (a *Agent) Once(ctx context.Context) ([]protocol.ModuleReport, error) {
 	if a.Cfg.DeviceID == "" || a.Cfg.DeviceSecret == "" {
-		return fmt.Errorf("not enrolled: run `fleet-agent enroll` first")
+		return nil, fmt.Errorf("not enrolled: run `fleet-agent enroll` first")
 	}
 
 	resp, err := a.Client.Checkin(ctx, a.Cfg.DeviceID, a.Cfg.DeviceSecret, protocol.CheckinRequest{
@@ -96,30 +97,30 @@ func (a *Agent) Once(ctx context.Context) error {
 		Generation: a.Cfg.Generation,
 	})
 	if err != nil {
-		return fmt.Errorf("checkin: %w", err)
+		return nil, fmt.Errorf("checkin: %w", err)
 	}
 	if resp.Bundle == nil {
 		a.Log.Debug("no policy assigned")
-		return nil
+		return nil, nil
 	}
 
 	pub, err := protocol.DecodePublicKey(a.Cfg.SigningKey)
 	if err != nil {
-		return fmt.Errorf("pinned signing key is invalid: %w", err)
+		return nil, fmt.Errorf("pinned signing key is invalid: %w", err)
 	}
 	if err := protocol.Verify(resp.Bundle, pub); err != nil {
-		return fmt.Errorf("rejecting policy bundle: %w", err)
+		return nil, fmt.Errorf("rejecting policy bundle: %w", err)
 	}
 	if resp.Bundle.DeviceID != a.Cfg.DeviceID {
-		return fmt.Errorf("bundle is for device %q, not %q", resp.Bundle.DeviceID, a.Cfg.DeviceID)
+		return nil, fmt.Errorf("bundle is for device %q, not %q", resp.Bundle.DeviceID, a.Cfg.DeviceID)
 	}
 	if resp.Bundle.Generation < a.Cfg.Generation {
-		return fmt.Errorf("%w: bundle %d < applied %d",
+		return nil, fmt.Errorf("%w: bundle %d < applied %d",
 			protocol.ErrStaleGeneration, resp.Bundle.Generation, a.Cfg.Generation)
 	}
 	if resp.Bundle.Generation == a.Cfg.Generation {
 		a.Log.Debug("policy unchanged", "generation", a.Cfg.Generation)
-		return nil
+		return nil, nil
 	}
 
 	reports := a.apply(ctx, resp.Bundle)
@@ -133,7 +134,7 @@ func (a *Agent) Once(ctx context.Context) error {
 	if err := a.Cfg.Save(a.CfgPath); err != nil {
 		a.Log.Error("could not persist generation", "error", err)
 	}
-	return nil
+	return reports, nil
 }
 
 func (a *Agent) apply(ctx context.Context, b *protocol.Bundle) []protocol.ModuleReport {
@@ -181,7 +182,7 @@ func (a *Agent) applyItem(ctx context.Context, item protocol.Item) (rep protocol
 func (a *Agent) Run(ctx context.Context) error {
 	wait := a.Cfg.Interval()
 	for {
-		err := a.Once(ctx)
+		_, err := a.Once(ctx)
 		switch {
 		case err != nil:
 			a.Log.Error("cycle failed", "error", err)

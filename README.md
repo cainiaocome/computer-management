@@ -6,8 +6,12 @@ macOS boxes, and the laptop you look after for a family member.
 You describe the desired state (browser policy, packages, which account is a
 standard user), the agent converges to it, and the server shows you what drifted.
 
+中文文档：[`README.zh-CN.md`](README.zh-CN.md)。
+
 - Design and hard limits: [`docs/design.md`](docs/design.md)
+- Platform internals (registry, TCC, UCPD, launchd, MDM): [`docs/platforms.md`](docs/platforms.md)
 - Machine setup checklists: [`docs/provisioning.md`](docs/provisioning.md)
+- End-to-end tests (three tiers, real VMs): [`test/e2e/README.md`](test/e2e/README.md)
 
 ## What it does
 
@@ -157,8 +161,9 @@ make vet fmt-check
 make cross       # cross-compile the agent for all platforms
 ```
 
-CI runs the suite on `ubuntu-latest`, `macos-latest` and `windows-latest`, plus
-the end-to-end test and a cross-compile check.
+CI runs the unit tests on `ubuntu-latest`, `macos-latest` and `windows-latest`,
+plus the logical end-to-end test, the real-OS end-to-end suite and a cross-compile
+check. See [`test/e2e/README.md`](test/e2e/README.md) for what each tier proves.
 
 ## Status
 

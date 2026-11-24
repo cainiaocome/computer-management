@@ -1,0 +1,32 @@
+# Real macOS VM for end-to-end tests.
+#
+# Unlike the Windows container, dockur/macos cannot install unattended: the
+# installer needs a human in the web console (Disk Utility, erase, reinstall,
+# create the account). That is a ONE-TIME cost; afterwards everything is driven
+# by test/e2e/vm/macos/run.sh over SSH.
+#
+# NOTE: Apple's licence only permits macOS virtualisation on Apple hardware.
+# Run this on a Mac (Linux host + OSX-KVM is legally grey). It is a local lab
+# tool, not something CI should do.
+services:
+  macos:
+    image: dockurr/macos
+    container_name: ${CONTAINER_NAME:-fleet-e2e-macos}
+    environment:
+      VERSION: "${MACOS_VERSION:-15}"
+      RAM_SIZE: "${VM_RAM:-6G}"
+      CPU_CORES: "${VM_CPUS:-4}"
+      DISK_SIZE: "64G"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8007}:8006"
+      - "127.0.0.1:${SSH_PORT:-2223}:22/tcp"
+    volumes:
+      - ./storage:/storage
+      - ./shared:/shared
+    restart: unless-stopped
+    stop_grace_period: 2m

@@ -368,10 +368,10 @@ compliance item so the operator can see what is still outstanding.
 - **Agent integration** — `apply --once` against a local server in a temp
   filesystem root (`--root` override) on all three runners, verifying the files
   the agent writes and the state it reports.
-- **Real-OS validation** is manual and documented in `docs/provisioning.md`:
-  a dockur/windows or dockur/macos VM, or a spare laptop. VM boot is slow on the
-  N100; CI runners are the primary automated signal, a real machine is the final
-  check.
+- **Real-OS validation** runs on GitHub-hosted Windows/macOS runners (which are
+  real operating systems) via `test/e2e/guest/verify.*`, and locally in a real VM
+  with `test/e2e/vm/*/run.sh`. See [`../test/e2e/README.md`](../test/e2e/README.md).
+  Platform internals are documented in [`platforms.md`](platforms.md).
 
 Non-goals for CI: booting macOS VMs inside GitHub Actions (licensing/feasibility),
 and TCC/UCPD behaviour, which is only observable on a real machine and is covered
