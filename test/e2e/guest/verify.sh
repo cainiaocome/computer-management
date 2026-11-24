@@ -242,12 +242,12 @@ section "code identity"
 if command -v codesign >/dev/null 2>&1; then
   cp "$AGENT" "$WORK/a1"
   cp "$AGENT" "$WORK/a2"
-  codesign -f -s - "$WORK/a1" >/dev/null 2>&1
+  codesign -f -s - -i com.fleet.e2e.agent "$WORK/a1" >/dev/null 2>&1
   check "ad-hoc signing works" $?
   codesign --verify --strict "$WORK/a1" >/dev/null 2>&1
   check "ad-hoc signature verifies" $?
 
-  codesign -f -s - "$WORK/a2" >/dev/null 2>&1
+  codesign -f -s - -i com.fleet.e2e.agent "$WORK/a2" >/dev/null 2>&1
   H1=$(codesign -dv --verbose=4 "$WORK/a1" 2>&1 | sed -n 's/^CDHash=//p')
   H2=$(codesign -dv --verbose=4 "$WORK/a2" 2>&1 | sed -n 's/^CDHash=//p')
   [ -n "$H1" ] && [ "$H1" = "$H2" ]
@@ -255,7 +255,7 @@ if command -v codesign >/dev/null 2>&1; then
 
   # One changed byte is exactly what a rebuild does.
   printf 'x' >> "$WORK/a2"
-  codesign -f -s - "$WORK/a2" >/dev/null 2>&1
+  codesign -f -s - -i com.fleet.e2e.agent "$WORK/a2" >/dev/null 2>&1
   H3=$(codesign -dv --verbose=4 "$WORK/a2" 2>&1 | sed -n 's/^CDHash=//p')
   [ -n "$H3" ] && [ "$H3" != "$H1" ]
   check "a content change produces a new identity (this is what breaks TCC grants)" $? "$H3"
