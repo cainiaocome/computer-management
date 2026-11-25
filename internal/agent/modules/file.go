@@ -35,7 +35,7 @@ func (File) Apply(ctx context.Context, item protocol.Item) Outcome {
 		return failed(fmt.Errorf("path is required"))
 	}
 	e := env(ctx)
-	if !filepath.IsAbs(cfg.Path) {
+	if !isRootedPath(cfg.Path) {
 		return failed(fmt.Errorf("path %q must be absolute", cfg.Path))
 	}
 	path := e.Resolve(cfg.Path)
@@ -119,6 +119,13 @@ var writeDeny = []string{
 	"/library/launchdaemons", "/library/launchagents", "/system/library",
 	"/etc/fleet", "/programdata/fleet", "/program files/fleet",
 	"\\windows\\system32", "\\windows\\syswow64", "\\windows\\sysnative",
+}
+
+// isRootedPath reports whether p is rooted. A leading separator counts even on
+// Windows: "/etc/x" and "\\etc\\x" both mean the volume root, and a policy that
+// says "etc/x" would otherwise resolve against the daemon's working directory.
+func isRootedPath(p string) bool {
+	return filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`)
 }
 
 // checkFilePath rejects paths the agent must never write on policy command.

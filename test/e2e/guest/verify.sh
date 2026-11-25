@@ -134,9 +134,11 @@ section "policy assignment"
 # said no even with Firefox in /Applications. Real app bundles look like this.
 APP="/Applications/Firefox.app"
 APPDIR="$APP/Contents/Resources"
-mkdir -p "$APPDIR"
-printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict/></plist>\n' > "$APP/Contents/Info.plist"
-[ -d "$APP" ]; check "a Firefox.app bundle exists for the test" $? "$APP"
+if [ ! -d "$APP" ]; then
+  mkdir -p "$APPDIR"
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict/></plist>\n' > "$APP/Contents/Info.plist"
+fi
+[ -d "$APP" ]; check "a Firefox.app bundle exists on disk for the test" $? "$APP"
 cat > "$WORK/policy.json" <<JSON
 {"policies":[
  {"id":"firefox","type":"firefox.policy","class":"enforce","enabled":true,"config":{
@@ -234,10 +236,17 @@ MTIME_AFTER=$(mtime_of "$POLICY")
 [ "$MTIME_BEFORE" = "$MTIME_AFTER" ]; check "policy file not rewritten on a no-op cycle" $? "mtime changed"
 
 # The check above is weak: with the same generation the agent returns before any
-# module runs, so it would pass even for a module that rewrites every time. Push
-# a new generation whose desired state is identical, so every module really runs
-# again and must find nothing to do.
-api PUT "/api/v1/admin/groups/$GROUP" "$(cat "$WORK/policy.json")" >/dev/null
+# module runs, so it would pass even for a module that rewrites every time. Add a
+# harmless extra item to force a new generation (the server only bumps when the
+# stored policy actually changes), so every module really runs again.
+python3 - "$WORK/policy.json" > "$WORK/policy2.json" <<'PY2'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["policies"].append({"id": "noop", "type": "inventory", "class": "report_only",
+                      "enabled": True, "config": {"note": "force a new generation"}})
+json.dump(d, sys.stdout)
+PY2
+api PUT "/api/v1/admin/groups/$GROUP" "$(cat "$WORK/policy2.json")" >/dev/null
 "$AGENT" once -config "$CFG" -json -log-level error > "$WORK/reports2.json" 2>"$WORK/once2.err"
 RC2=$?
 check "second apply exits 0" $RC2 "$(cat "$WORK/once2.err")"

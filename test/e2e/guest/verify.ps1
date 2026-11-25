@@ -187,10 +187,17 @@ if ($policyExists) {
     Check "wildcard blocks other extensions" ($wildcard.installation_mode -eq 'blocked') "$($wildcard.installation_mode)"
     Check "telemetry disabled by default" ($doc.policies.DisableTelemetry -eq $true)
     Check "firefox report is honest (status matches disk)" ($ffStatus -in @('changed', 'compliant')) "$ffStatus"
+    # The runner image may or may not ship Firefox; the report must agree with
+    # the machine either way, and must say so when it is only pre-staging.
     $inv = $reports | Where-Object { $_.id -eq 'inventory' }
-    Check "inventory does not claim Firefox is installed just because a policy was pre-staged" ($inv.detail.firefox -eq $false) "$($inv.detail.firefox)"
+    $ffInstalled = Test-Path 'C:\Program Files\Mozilla Firefox\firefox.exe'
+    Check "inventory agrees with the actual Firefox installation" ($inv.detail.firefox -eq $ffInstalled) "reported=$($inv.detail.firefox) actual=$ffInstalled"
     $ff = $reports | Where-Object { $_.id -eq 'firefox' }
-    Check "firefox report says the policy is only pre-staged" ($ff.message -match 'not installed') $ff.message
+    if (-not $ffInstalled) {
+        Check "firefox report says the policy is only pre-staged" ($ff.message -match 'not installed') $ff.message
+    } else {
+        Check "firefox report names the file it wrote" ($ff.message -match 'policies.json') $ff.message
+    }
 } else {
     # App Management / permission problems are legitimate, but the agent must
     # then say so instead of claiming success.
