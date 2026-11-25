@@ -8,7 +8,7 @@
   <p class="empty">No groups yet. A group holds a policy bundle; devices are
   assigned to one group and can add per-device overrides.</p>
 {{else}}
-<table class="grid">
+<div class="tablewrap"><table class="grid">
   <thead><tr><th>Group</th><th>Items</th><th></th></tr></thead>
   <tbody>
   {{range .Groups}}
@@ -19,7 +19,7 @@
     </tr>
   {{end}}
   </tbody>
-</table>
+</table></div>
 {{end}}
 {{end}}
 {{end}}

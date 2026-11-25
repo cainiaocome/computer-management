@@ -1,7 +1,7 @@
 {{define "content"}}
 {{with .Data}}
 <div class="stats">
-  <div class="stat"><span class="n">{{.Total}}</span> devices</div>
+  <div class="stat"><span class="n">{{.Total}}</span> {{plural .Total "device" "devices"}}</div>
   <div class="stat ok"><span class="n">{{.Healthy}}</span> compliant</div>
   <div class="stat warn"><span class="n">{{.Attention}}</span> attention</div>
   <div class="stat muted"><span class="n">{{.Stale}}</span> stale</div>
@@ -13,7 +13,7 @@
   <a href="/ui/enrol">Enrolment</a>, then run
   <code>fleet-agent enroll -server &lt;url&gt; -token &lt;token&gt;</code> on the machine.</p>
 {{else}}
-<table class="grid">
+<div class="tablewrap"><table class="grid">
   <thead>
     <tr><th>Device</th><th>OS</th><th>Group</th><th>Generation</th><th>Last seen</th><th>State</th></tr>
   </thead>
@@ -36,7 +36,7 @@
     </tr>
   {{end}}
   </tbody>
-</table>
+</table></div>
 {{end}}
 {{end}}
 {{end}}

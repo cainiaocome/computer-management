@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -57,6 +58,12 @@ var uiFuncs = template.FuncMap{
 		}
 		return string(b)
 	},
+	"plural": func(n int, one, many string) string {
+		if n == 1 {
+			return one
+		}
+		return many
+	},
 	"statusClass": func(status string) string {
 		switch status {
 		case protocol.StatusCompliant:
@@ -100,6 +107,9 @@ type uiPage struct {
 	Error   string
 	Version string
 	Data    any
+	// Authed hides the navigation and the sign-out button on the login page:
+	// offering "sign out" to an anonymous visitor is nonsense.
+	Authed bool
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, page string, data uiPage) {
@@ -109,6 +119,9 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, page string, dat
 		return
 	}
 	data.Version = s.cfg.Version
+	if data.Nav != "" {
+		data.Authed = true
+	}
 	if data.Flash == "" {
 		data.Flash = r.URL.Query().Get("ok")
 	}
@@ -448,6 +461,9 @@ func (s *Server) uiGroup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		raw = p
+		if pretty, err := indentJSON(p); err == nil {
+			raw = pretty
+		}
 	}
 	s.render(w, r, "group", uiPage{
 		Title: "Group " + name, Nav: "groups",
@@ -541,6 +557,19 @@ func (s *Server) uiAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, r, "audit", uiPage{Title: "Audit", Nav: "audit", Data: entries})
+}
+
+// indentJSON pretty-prints a stored policy so the textarea is readable. The
+// stored form stays compact; this is display only.
+func indentJSON(raw string) (string, error) {
+	// json.Indent only reformats, so the stored key order is preserved: id,
+	// type, class, enabled, config. Round-tripping through map[string]any would
+	// sort the keys and bury "id" in the middle of the item.
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, []byte(raw), "", "  "); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 func atoiDefault(s string, def int) int {

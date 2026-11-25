@@ -83,6 +83,8 @@ p { margin: 8px 0; }
 .stat.ok .n { color: var(--ok); }
 .stat.warn .n { color: var(--warn); }
 
+.tablewrap { overflow-x: auto; border-radius: 10px; }
+
 table.grid {
   width: 100%;
   border-collapse: collapse;
@@ -128,8 +130,12 @@ table.grid tbody tr:hover { background: var(--panel-2); }
 .banner .secret { margin: 10px 0 4px; font-size: 15px; user-select: all; }
 
 form.stack { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+/* A flex column would stretch a lone button to the full width. */
+form.stack > button { align-self: flex-start; }
 form.row { display: flex; gap: 12px; align-items: flex-end; margin: 14px 0; }
 form.row.wrap { flex-wrap: wrap; }
+form.row.end { align-items: flex-end; }
+form.row input[type=number] { width: 9em; }
 .row { display: flex; gap: 12px; align-items: center; }
 .row.spread { justify-content: space-between; }
 
@@ -146,6 +152,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 textarea { resize: vertical; }
 
 button, .button {
+  white-space: nowrap;
   font: inherit;
   border-radius: 8px;
   border: 1px solid var(--line);
@@ -182,6 +189,17 @@ footer {
   padding: 0 24px 40px;
   color: var(--muted);
   font-size: 12.5px;
+}
+
+@media (max-width: 640px) {
+  /* One row of brand, nav and sign-out does not fit; let it wrap instead of
+     pushing the header wider than the viewport. */
+  .top { height: auto; flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
+  .brand .ver { display: none; }
+  .top nav { order: 3; flex-basis: 100%; overflow-x: auto; }
+  .top nav a { padding: 6px 8px; }
+  main { padding: 20px 14px 48px; }
+  .tablewrap table.grid { min-width: 560px; }
 }
 
 @media (prefers-color-scheme: light) {

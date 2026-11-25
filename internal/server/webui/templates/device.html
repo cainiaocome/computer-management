@@ -16,7 +16,7 @@
   <p class="empty">No report yet. The agent reports after it applies a policy
   generation; nothing here means this device has not checked in since enrolling.</p>
 {{else}}
-<table class="grid">
+<div class="tablewrap"><table class="grid">
   <thead><tr><th>Item</th><th>Type</th><th>Class</th><th>Status</th><th>Message</th></tr></thead>
   <tbody>
   {{range $d.Reports}}
@@ -29,7 +29,7 @@
     </tr>
   {{end}}
   </tbody>
-</table>
+</table></div>
 {{end}}
 
 <h2>Assignment</h2>

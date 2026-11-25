@@ -9,6 +9,7 @@
 <body>
 <header class="top">
   <a class="brand" href="/ui/">fleet<span class="dot">·</span><span class="ver">{{.Version}}</span></a>
+  {{if .Authed}}
   <nav>
     <a href="/ui/" {{if eq .Nav "devices"}}class="on"{{end}}>Devices</a>
     <a href="/ui/groups" {{if eq .Nav "groups"}}class="on"{{end}}>Groups</a>
@@ -18,6 +19,7 @@
   <form method="post" action="/ui/logout" class="logout">
     <button type="submit" class="link">Sign out</button>
   </form>
+  {{end}}
 </header>
 
 <main>

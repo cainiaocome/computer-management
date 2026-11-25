@@ -121,8 +121,16 @@ func TestUIRequiresASession(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("login page: want 200, got %d", resp.StatusCode)
 	}
-	if html := body(t, resp); !strings.Contains(html, `name="token"`) {
+	html := body(t, resp)
+	if !strings.Contains(html, `name="token"`) {
 		t.Fatal("login page has no token field")
+	}
+	// Regression: the layout used to render the nav and a "Sign out" button to
+	// an anonymous visitor.
+	for _, chrome := range []string{"/ui/logout", "Sign out", "/ui/audit"} {
+		if strings.Contains(html, chrome) {
+			t.Fatalf("login page must not offer authenticated chrome (%q)", chrome)
+		}
 	}
 }
 

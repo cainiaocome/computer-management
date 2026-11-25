@@ -12,9 +12,9 @@
 </div>
 {{end}}
 
-<form method="post" action="/ui/enrol" class="row wrap">
+<form method="post" action="/ui/enrol" class="row wrap end">
   <label>Label <input type="text" name="label" placeholder="mom-laptop"></label>
-  <label>Valid for <input type="number" name="ttl_seconds" value="3600" min="60" step="60"> seconds</label>
+  <label>Valid for (seconds) <input type="number" name="ttl_seconds" value="3600" min="60" step="60"></label>
   <label>Uses <input type="number" name="max_uses" value="1" min="1"></label>
   <button type="submit" class="primary">Create token</button>
 </form>
@@ -23,7 +23,7 @@
 {{if not .Tokens}}
   <p class="empty">No tokens yet.</p>
 {{else}}
-<table class="grid">
+<div class="tablewrap"><table class="grid">
   <thead><tr><th>Label</th><th>Created</th><th>Expires</th><th>Used</th></tr></thead>
   <tbody>
   {{range .Tokens}}
@@ -35,7 +35,7 @@
     </tr>
   {{end}}
   </tbody>
-</table>
+</table></div>
 {{end}}
 {{end}}
 {{end}}
