@@ -78,7 +78,8 @@ jobs:
 
           $log = Join-Path $env:RUNNER_TEMP 'server.log'
           $p = Start-Process -FilePath $exe -PassThru -RedirectStandardError $log `
-            -ArgumentList '-addr','127.0.0.1:8080','-db',(Join-Path $env:RUNNER_TEMP 'fleet.db'),
+            -ArgumentList '-addr','127.0.0.1:8080','-admin-addr','127.0.0.1:8080',
+                          '-db',(Join-Path $env:RUNNER_TEMP 'fleet.db'),
                           '-key',(Join-Path $env:RUNNER_TEMP 'fleet.key'),'-log-level','warn'
 
           $rc = 1
@@ -107,7 +108,9 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          ./bin/fleet-server -addr 127.0.0.1:8080 \
+          # One port for this suite: the guest scripts call the admin API on the
+          # agent URL. The split listener layout is covered by scripts/e2e.sh.
+          ./bin/fleet-server -addr 127.0.0.1:8080 -admin-addr "" \
             -db "$RUNNER_TEMP/fleet.db" -key "$RUNNER_TEMP/fleet.key" \
             -admin-token e2e-vm-admin-token -log-level warn >"$RUNNER_TEMP/server.log" 2>&1 &
           SERVER_PID=$!
