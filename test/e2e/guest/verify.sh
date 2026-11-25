@@ -53,8 +53,12 @@ status_of() {
     sed -n 's/.*"status":"\([a-z_]*\)".*/\1/p' | head -1
 }
 
-json_str() { # json_str <file> <key>
+json_str() { # json_str <file> <key> - string values only
   sed -n 's/.*"'"$2"'":[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -1
+}
+
+json_num() { # json_num <file> <key> - numeric values (json_str returns "" for them)
+  sed -n 's/.*"'"$2"'":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$1" | head -1
 }
 
 mtime_of() { stat -f %m "$1" 2>/dev/null || echo 0; }
@@ -227,10 +231,10 @@ case "$BR" in action_required|compliant) pass "browser.default gives the user an
 # --- 6. idempotency --------------------------------------------------------
 section "idempotency"
 MTIME_BEFORE=$(mtime_of "$POLICY")
-GEN_BEFORE=$(json_str "$CFG" generation)
+GEN_BEFORE=$(json_num "$CFG" generation)
 "$AGENT" once -config "$CFG" -log-level error >/dev/null 2>&1
 sleep 1
-GEN_AFTER=$(json_str "$CFG" generation)
+GEN_AFTER=$(json_num "$CFG" generation)
 MTIME_AFTER=$(mtime_of "$POLICY")
 [ "$GEN_BEFORE" = "$GEN_AFTER" ]; check "generation unchanged without a policy change" $? "$GEN_BEFORE -> $GEN_AFTER"
 [ "$MTIME_BEFORE" = "$MTIME_AFTER" ]; check "policy file not rewritten on a no-op cycle" $? "mtime changed"
@@ -253,8 +257,12 @@ check "second apply exits 0" $RC2 "$(cat "$WORK/once2.err")"
 R2=$(cat "$WORK/reports2.json")
 FF2=$(status_of "$R2" firefox)
 MTIME_AFTER2=$(mtime_of "$POLICY")
-note "generation $GEN_AFTER -> $(json_str "$CFG" generation); firefox now $FF2"
-[ "$(json_str "$CFG" generation)" -gt "$GEN_AFTER" ]; check "a re-published policy bumps the generation" $? "generation did not move"
+GEN2=$(json_num "$CFG" generation)
+note "generation $GEN_AFTER -> $GEN2; firefox now $FF2"
+case "$GEN_AFTER$GEN2" in
+  ''|*[!0-9]*) fail "generation is not a number in $CFG ($GEN_AFTER -> $GEN2)";;
+  *) [ "$GEN2" -gt "$GEN_AFTER" ]; check "a re-published policy bumps the generation" $? "generation did not move";;
+esac
 [ "$FF2" = "compliant" ]; check "re-running with identical desired state writes nothing" $? "$FF2"
 [ "$MTIME_AFTER" = "$MTIME_AFTER2" ]; check "policy file untouched when it is already correct" $? "$MTIME_AFTER -> $MTIME_AFTER2"
 
