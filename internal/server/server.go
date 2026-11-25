@@ -101,24 +101,55 @@ func dirOf(p string) string {
 	return "."
 }
 
-// Handler returns the full HTTP API.
+// Handler returns every endpoint: agent API, admin API and web UI.
+//
+// Production uses AgentHandler and AdminHandler on separate listeners, so the
+// admin surface - and the UI that manages every machine - is not reachable from
+// wherever agents connect. Handler exists for tests and simple single-port
+// setups.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.Handle("/", s.AgentHandler())
+	mux.Handle("/api/v1/admin/", s.adminMux())
+	mux.Handle("/ui/", s.uiHandler())
+	return mux
+}
 
+// AgentHandler serves only what a managed machine needs: enrolment, checkin,
+// report and a health check. This is the listener exposed to the fleet.
+func (s *Server) AgentHandler() http.Handler {
+	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": s.cfg.Version})
 	})
 	mux.HandleFunc("POST /api/v1/enroll", s.handleEnroll)
 	mux.HandleFunc("POST /api/v1/checkin", s.handleCheckin)
 	mux.HandleFunc("POST /api/v1/report", s.handleReport)
+	return mux
+}
 
+// AdminHandler serves the admin API and the web UI.
+func (s *Server) AdminHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/api/v1/admin/", s.adminMux())
+	mux.Handle("/ui/", s.uiHandler())
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/", http.StatusSeeOther)
+	})
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": s.cfg.Version})
+	})
+	return mux
+}
+
+func (s *Server) adminMux() *http.ServeMux {
+	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/admin/devices", s.admin(s.handleListDevices))
 	mux.HandleFunc("PUT /api/v1/admin/devices/{id}", s.admin(s.handleSetDevicePolicy))
 	mux.HandleFunc("GET /api/v1/admin/groups", s.admin(s.handleListGroups))
 	mux.HandleFunc("PUT /api/v1/admin/groups/{name}", s.admin(s.handleSetGroupPolicy))
 	mux.HandleFunc("POST /api/v1/admin/enrollment-tokens", s.admin(s.handleCreateToken))
 	mux.HandleFunc("GET /api/v1/admin/audit", s.admin(s.handleAudit))
-
 	return mux
 }
 

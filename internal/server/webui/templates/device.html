@@ -1,0 +1,61 @@
+{{define "content"}}
+{{with .Data}}
+{{$d := .Device}}
+<h1>{{if $d.Hostname}}{{$d.Hostname}}{{else}}{{$d.ID}}{{end}}</h1>
+<p class="mono muted small">{{$d.ID}}</p>
+
+<div class="stats">
+  <div class="stat"><span class="n">{{$d.Generation}}</span> generation</div>
+  <div class="stat"><span class="n">{{$d.OS}}</span> {{$d.OSVersion}} {{$d.Arch}}</div>
+  <div class="stat"><span class="n">{{ago $d.LastSeenAt}}</span> last seen</div>
+  <div class="stat"><span class="n">{{$d.Version}}</span> agent version</div>
+</div>
+
+<h2>Reports</h2>
+{{if not $d.Reports}}
+  <p class="empty">No report yet. The agent reports after it applies a policy
+  generation; nothing here means this device has not checked in since enrolling.</p>
+{{else}}
+<table class="grid">
+  <thead><tr><th>Item</th><th>Type</th><th>Class</th><th>Status</th><th>Message</th></tr></thead>
+  <tbody>
+  {{range $d.Reports}}
+    <tr>
+      <td class="mono">{{.ID}}</td>
+      <td class="mono">{{.Type}}</td>
+      <td>{{.Class}}</td>
+      <td><span class="pill {{statusClass .Status}}">{{.Status}}</span></td>
+      <td>{{.Message}}{{if .Detail}}<details><summary class="small muted">detail</summary><pre>{{pretty .Detail}}</pre></details>{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}
+
+<h2>Assignment</h2>
+<form method="post" action="/ui/devices/{{$d.ID}}" class="stack">
+  <label>Group
+    <select name="group">
+      <option value="" {{if not $d.Group}}selected{{end}}>— none —</option>
+      {{range $.Data.Groups}}<option value="{{.}}" {{if eq . $d.Group}}selected{{end}}>{{.}}</option>{{end}}
+    </select>
+  </label>
+  <label>Per-device overrides (JSON array of policy items, applied after the group)
+    <textarea name="override" rows="12" spellcheck="false" class="mono">{{.Override}}</textarea>
+  </label>
+  <div class="row">
+    <button type="submit" class="primary">Save</button>
+    <span class="muted small">Validated on the server; the device picks it up at its next checkin.</span>
+  </div>
+</form>
+
+<h2>Danger zone</h2>
+<form method="post" action="/ui/devices/{{$d.ID}}/revoke" class="stack"
+      onsubmit="return confirm('Revoke this device? Its secret stops working immediately.')">
+  <p class="muted small">Revoking deletes the device record, so its secret stops
+  working at the next checkin and it applies no further policy. The machine keeps
+  whatever state it already has; it is not wiped.</p>
+  <button type="submit" class="danger">Revoke device</button>
+</form>
+{{end}}
+{{end}}

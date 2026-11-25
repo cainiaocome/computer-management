@@ -9,7 +9,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PORT="${PORT:-18080}"
+ADMIN_PORT="${ADMIN_PORT:-18081}"
 BASE="http://127.0.0.1:${PORT}"
+ADMIN="http://127.0.0.1:${ADMIN_PORT}"
 WORK="$(mktemp -d)"
 ADMIN_TOKEN="e2e-admin-token"
 SERVER_PID=""
@@ -27,8 +29,9 @@ mkdir -p "$WORK/bin"
 CGO_ENABLED=0 go build -o "$WORK/bin/fleet-server" ./cmd/server
 CGO_ENABLED=0 go build -o "$WORK/bin/fleet-agent" ./cmd/agent
 
-say "starting server on ${BASE}"
-"$WORK/bin/fleet-server" -addr "127.0.0.1:${PORT}" \
+say "starting server on ${BASE} (admin and UI on ${ADMIN})"
+# Same layout as production: agents on one port, admin API and web UI on another.
+"$WORK/bin/fleet-server" -addr "127.0.0.1:${PORT}" -admin-addr "127.0.0.1:${ADMIN_PORT}" \
   -db "$WORK/fleet.db" -key "$WORK/signing.key" \
   -admin-token "$ADMIN_TOKEN" -log-level warn >"$WORK/server.log" 2>&1 &
 SERVER_PID=$!
@@ -39,8 +42,18 @@ for _ in $(seq 1 50); do
 done
 curl -fsS "$BASE/healthz" >/dev/null || { echo "server did not start"; cat "$WORK/server.log"; exit 1; }
 
+say "agent port serves no admin surface"
+if curl -fsS "$BASE/api/v1/admin/devices" >/dev/null 2>&1; then
+  echo "FAIL: the admin API answered on the agent port"; exit 1
+fi
+if curl -fsS "$BASE/ui/" >/dev/null 2>&1; then
+  echo "FAIL: the web UI answered on the agent port"; exit 1
+fi
+curl -fsS "$ADMIN/ui/login" >/dev/null || { echo "FAIL: the UI does not answer on the admin port"; exit 1; }
+echo "   ok"
+
 say "minting an enrolment token"
-TOKEN=$(curl -fsS -X POST "$BASE/api/v1/admin/enrollment-tokens" \
+TOKEN=$(curl -fsS -X POST "$ADMIN/api/v1/admin/enrollment-tokens" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
   -d '{"label":"e2e-mac","ttl_seconds":600,"max_uses":1}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
 [ -n "$TOKEN" ] || { echo "no token"; exit 1; }
@@ -66,10 +79,10 @@ policy = {"policies": [
 json.dump(policy, open(sys.argv[1], "w"))
 PY
 
-curl -fsS -X PUT "$BASE/api/v1/admin/groups/parents" \
+curl -fsS -X PUT "$ADMIN/api/v1/admin/groups/parents" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
   -d @"$WORK/policy.json" >/dev/null
-curl -fsS -X PUT "$BASE/api/v1/admin/devices/$DEVICE_ID" \
+curl -fsS -X PUT "$ADMIN/api/v1/admin/devices/$DEVICE_ID" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
   -d '{"group":"parents"}' >/dev/null
 
@@ -92,7 +105,7 @@ GEN2=$(python3 -c 'import json;print(json.load(open("'"$WORK"'/agent.json"))["ge
 [ "$GEN1" = "$GEN2" ] || { echo "FAIL: generation changed without a policy change ($GEN1 -> $GEN2)"; exit 1; }
 
 say "server sees the device as compliant"
-curl -fsS "$BASE/api/v1/admin/devices" -H "Authorization: Bearer $ADMIN_TOKEN" \
+curl -fsS "$ADMIN/api/v1/admin/devices" -H "Authorization: Bearer $ADMIN_TOKEN" \
   | python3 -c '
 import json, sys
 devices = json.load(sys.stdin)["devices"]

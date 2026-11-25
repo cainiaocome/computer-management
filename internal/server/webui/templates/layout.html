@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · fleet</title>
+<link rel="stylesheet" href="/ui/static/app.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/ui/">fleet<span class="dot">·</span><span class="ver">{{.Version}}</span></a>
+  <nav>
+    <a href="/ui/" {{if eq .Nav "devices"}}class="on"{{end}}>Devices</a>
+    <a href="/ui/groups" {{if eq .Nav "groups"}}class="on"{{end}}>Groups</a>
+    <a href="/ui/enrol" {{if eq .Nav "enrol"}}class="on"{{end}}>Enrolment</a>
+    <a href="/ui/audit" {{if eq .Nav "audit"}}class="on"{{end}}>Audit</a>
+  </nav>
+  <form method="post" action="/ui/logout" class="logout">
+    <button type="submit" class="link">Sign out</button>
+  </form>
+</header>
+
+<main>
+  {{if .Error}}<div class="banner bad">{{.Error}}</div>{{end}}
+  {{if .Flash}}<div class="banner ok">{{.Flash}}</div>{{end}}
+  {{template "content" .}}
+</main>
+
+<footer>
+  Declarative policy only: the agent has no command-execution endpoint.
+</footer>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{{define "content"}}
+<div class="login">
+  <h1>Sign in</h1>
+  <p class="muted">Use the admin token (<code>FLEET_ADMIN_TOKEN</code>). It is
+  exchanged for a session cookie and never stored in the browser.</p>
+  <form method="post" action="/ui/login">
+    <label>Admin token
+      <input type="password" name="token" autocomplete="current-password" autofocus required>
+    </label>
+    <button type="submit" class="primary">Sign in</button>
+  </form>
+</div>
+{{end}}

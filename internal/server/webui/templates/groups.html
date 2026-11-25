@@ -1,0 +1,25 @@
+{{define "content"}}
+{{with .Data}}
+<div class="row spread">
+  <h1>Groups</h1>
+  <a class="button primary" href="/ui/groups/new">New group</a>
+</div>
+{{if not .Groups}}
+  <p class="empty">No groups yet. A group holds a policy bundle; devices are
+  assigned to one group and can add per-device overrides.</p>
+{{else}}
+<table class="grid">
+  <thead><tr><th>Group</th><th>Items</th><th></th></tr></thead>
+  <tbody>
+  {{range .Groups}}
+    <tr>
+      <td><a href="/ui/groups/{{.Name}}">{{.Name}}</a></td>
+      <td class="mono">{{.Items}}</td>
+      <td class="right"><a href="/ui/groups/{{.Name}}">Edit</a></td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}
+{{end}}
+{{end}}

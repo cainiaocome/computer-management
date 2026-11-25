@@ -159,6 +159,54 @@ func (s *Store) CreateToken(ctx context.Context, tokenHash, label string, expire
 
 // ConsumeToken atomically burns one use of a token. Returns false when the
 // token does not exist, is expired, or has no uses left.
+// Token is an enrolment token as shown in the admin UI: the secret is not
+// stored, so it can never be displayed twice.
+type Token struct {
+	Label     string    `json:"label"`
+	ExpiresAt time.Time `json:"expires_at"`
+	MaxUses   int       `json:"max_uses"`
+	Uses      int       `json:"uses"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ListTokens returns the most recent enrolment tokens.
+func (s *Store) ListTokens(ctx context.Context, limit int) ([]Token, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT label, expires_at, max_uses, uses, created_at
+		FROM enrollment_tokens ORDER BY created_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Token
+	for rows.Next() {
+		var t Token
+		var exp, created string
+		if err := rows.Scan(&t.Label, &exp, &t.MaxUses, &t.Uses, &created); err != nil {
+			return nil, err
+		}
+		t.ExpiresAt, t.CreatedAt = parseTS(exp), parseTS(created)
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// DeleteDevice removes a device, which revokes its secret immediately: the
+// next checkin fails and the agent stops applying policy.
+func (s *Store) DeleteDevice(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM devices WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ConsumeToken(ctx context.Context, tokenHash string) (bool, error) {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE enrollment_tokens SET uses = uses + 1

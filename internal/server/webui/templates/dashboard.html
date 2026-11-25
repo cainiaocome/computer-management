@@ -1,0 +1,42 @@
+{{define "content"}}
+{{with .Data}}
+<div class="stats">
+  <div class="stat"><span class="n">{{.Total}}</span> devices</div>
+  <div class="stat ok"><span class="n">{{.Healthy}}</span> compliant</div>
+  <div class="stat warn"><span class="n">{{.Attention}}</span> attention</div>
+  <div class="stat muted"><span class="n">{{.Stale}}</span> stale</div>
+  <div class="stat"><span class="n">{{.Groups}}</span> groups</div>
+</div>
+
+{{if not .Devices}}
+  <p class="empty">No devices have enrolled yet. Create an enrolment token under
+  <a href="/ui/enrol">Enrolment</a>, then run
+  <code>fleet-agent enroll -server &lt;url&gt; -token &lt;token&gt;</code> on the machine.</p>
+{{else}}
+<table class="grid">
+  <thead>
+    <tr><th>Device</th><th>OS</th><th>Group</th><th>Generation</th><th>Last seen</th><th>State</th></tr>
+  </thead>
+  <tbody>
+  {{range .Devices}}
+    <tr>
+      <td><a href="/ui/devices/{{.ID}}">{{if .Hostname}}{{.Hostname}}{{else}}{{.ID}}{{end}}</a>
+          <div class="mono muted small">{{.ID}}</div></td>
+      <td>{{if .OS}}{{.OS}} {{.OSVersion}}{{else}}<span class="muted">unknown</span>{{end}}
+          <div class="muted small">{{.Arch}}</div></td>
+      <td>{{if .Group}}<span class="tag">{{.Group}}</span>{{else}}<span class="muted">none</span>{{end}}</td>
+      <td class="mono">{{.Generation}}</td>
+      <td title="{{ts .LastSeenAt}}">{{ago .LastSeenAt}}</td>
+      <td>
+        {{if eq .Health "ok"}}<span class="pill ok">ok</span>
+        {{else if eq .Health "attention"}}<span class="pill warn">attention</span>
+        {{else}}<span class="pill muted">stale</span>{{end}}
+        {{range .Counts}}<span class="chip {{statusClass .Status}}">{{.Status}} {{.N}}</span>{{end}}
+      </td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}
+{{end}}
+{{end}}

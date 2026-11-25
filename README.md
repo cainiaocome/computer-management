@@ -47,8 +47,18 @@ make build
 
 # 2. run the control plane
 export FLEET_ADMIN_TOKEN=$(openssl rand -hex 24)
-./bin/fleet-server -addr :8080 -db fleet.db -key fleet-signing.key
+./bin/fleet-server -addr :8080 -admin-addr 127.0.0.1:8081 -db fleet.db -key fleet-signing.key
+# web UI: http://127.0.0.1:8081/ui/   (sign in with $FLEET_ADMIN_TOKEN)
+# agents:  http://<host>:8080
 ```
+
+The UI and the admin API listen on `-admin-addr` rather than the agent port, so
+the thing that can rewrite every machine's policy is not reachable from wherever
+laptops connect. See [docs/web-ui.md](./docs/web-ui.md). Set
+`-admin-addr :8080` to go back to a single port.
+
+Everything below can also be done by clicking, but the API is the source of
+truth and is what the UI calls:
 
 ```bash
 # 3. mint an enrolment token (single use, 1 hour)
@@ -130,7 +140,8 @@ every 5 minutes with jitter.
 - Strictly increasing bundle generation (anti-rollback).
 - Device secrets are stored hashed; each device can only fetch its own policy.
 - Every admin action is appended to the audit log.
-- The admin API is disabled entirely when `FLEET_ADMIN_TOKEN` is unset.
+- The admin API and the web UI are disabled entirely when `FLEET_ADMIN_TOKEN` is
+  unset, and they listen on a separate address from the agent API by default.
 
 Put the server behind TLS (reverse proxy or a mesh VPN such as Tailscale). The
 signature is what protects policy integrity; TLS protects device secrets.
@@ -145,10 +156,10 @@ internal/policy   class/tier vocabulary, validation, merge
 internal/agent    enrol, poll, apply, report
 internal/agent/modules  firefox, packages, file, browser.default,
                         macos.consent, user.account, inventory
-internal/server   HTTP API, SQLite store
+internal/server   HTTP API, web UI, SQLite store
 deploy/           launchd, systemd, windows install
 scripts/          install + end-to-end test
-docs/             design, provisioning
+docs/             design, platforms, provisioning, web UI
 ```
 
 ## Releasing

@@ -1,0 +1,21 @@
+{{define "content"}}
+{{with .Data}}
+<h1>{{if .New}}New group{{else}}Group {{.Name}}{{end}}</h1>
+<form method="post" action="{{if .New}}/ui/groups/new{{else}}/ui/groups/{{.Name}}{{end}}" class="stack">
+  {{if .New}}
+  <label>Name
+    <input type="text" name="name" required placeholder="parents">
+  </label>
+  {{end}}
+  <label>Policy items (JSON array)
+    <textarea name="policies" rows="24" spellcheck="false" class="mono">{{.Policy}}</textarea>
+  </label>
+  <div class="row">
+    <button type="submit" class="primary">Save policy</button>
+    <span class="muted small">Each item is validated: unknown types, a class that
+    does not fit the type's execution tier, or an enabled item with no config is
+    rejected here rather than shipped to a device.</span>
+  </div>
+</form>
+{{end}}
+{{end}}

@@ -44,8 +44,16 @@ make build
 
 # 2. 启动控制面
 export FLEET_ADMIN_TOKEN=$(openssl rand -hex 24)
-./bin/fleet-server -addr :8080 -db fleet.db -key fleet-signing.key
+./bin/fleet-server -addr :8080 -admin-addr 127.0.0.1:8081 -db fleet.db -key fleet-signing.key
+# Web 界面：http://127.0.0.1:8081/ui/   （用 $FLEET_ADMIN_TOKEN 登录）
+# agent：  http://<host>:8080
 ```
+
+界面与管理 API 监听 `-admin-addr` 而不是 agent 端口，因此"能改写每台机器策略"的
+东西不会暴露在笔记本所连的网络里。详见 [docs/web-ui.zh-CN.md](./docs/web-ui.zh-CN.md)。
+设 `-admin-addr :8080` 可回到单端口布局。
+
+下面这些操作同样可以在界面里点完成，但 API 才是事实来源，界面调用的也是它：
 
 ```bash
 # 3. 生成一次性注册令牌（1 小时有效）
@@ -125,7 +133,8 @@ agent 只**向外**连接（不开放端口，NAT 后也能用）。策略每 5 
 - generation 严格递增（防回滚）。
 - 设备密钥只存哈希；每台设备只能取自己的策略。
 - 所有管理操作写入追加式审计日志。
-- 未设置 `FLEET_ADMIN_TOKEN` 时管理接口整体关闭。
+- 未设置 `FLEET_ADMIN_TOKEN` 时管理接口与 Web 界面整体关闭；两者默认监听在与
+  agent API 不同的地址上。
 
 请把服务端放在 TLS 之后（反向代理或 Tailscale 之类的网状 VPN）。签名保证策略
 完整性，TLS 保护设备密钥。

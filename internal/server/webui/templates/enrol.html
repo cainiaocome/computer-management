@@ -1,0 +1,41 @@
+{{define "content"}}
+{{with .Data}}
+<h1>Enrolment</h1>
+
+{{if .New}}
+<div class="banner ok">
+  <strong>Token created — copy it now.</strong> Only a hash is stored, so this is
+  the one time it is shown.
+  <pre class="secret">{{.New}}</pre>
+  <p class="small">On the machine:</p>
+  <pre>sudo fleet-agent enroll -server {{""}}&lt;server url&gt; -token {{.New}}</pre>
+</div>
+{{end}}
+
+<form method="post" action="/ui/enrol" class="row wrap">
+  <label>Label <input type="text" name="label" placeholder="mom-laptop"></label>
+  <label>Valid for <input type="number" name="ttl_seconds" value="3600" min="60" step="60"> seconds</label>
+  <label>Uses <input type="number" name="max_uses" value="1" min="1"></label>
+  <button type="submit" class="primary">Create token</button>
+</form>
+
+<h2>Recent tokens</h2>
+{{if not .Tokens}}
+  <p class="empty">No tokens yet.</p>
+{{else}}
+<table class="grid">
+  <thead><tr><th>Label</th><th>Created</th><th>Expires</th><th>Used</th></tr></thead>
+  <tbody>
+  {{range .Tokens}}
+    <tr>
+      <td>{{if .Label}}{{.Label}}{{else}}<span class="muted">unlabelled</span>{{end}}</td>
+      <td title="{{ts .CreatedAt}}">{{ago .CreatedAt}}</td>
+      <td title="{{ts .ExpiresAt}}">{{ts .ExpiresAt}}</td>
+      <td class="mono">{{.Uses}} / {{.MaxUses}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}
+{{end}}
+{{end}}
