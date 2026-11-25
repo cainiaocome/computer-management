@@ -244,10 +244,15 @@ gate* — no amount of privilege fixes it, which is why this project plans two t
 
 The default handler is per-user `LaunchServices` state, stored in
 `~/Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist`
-as `LSHandlers` entries (`lsHandlerURLScheme = https` → `LSHandlerRoleAll =
-org.mozilla.firefox`). It is *not* a managed preference, so a profile cannot set
-it, and a root daemon cannot set it for another user. Tools like `defaultbrowser`
-work by calling `LSSetDefaultHandlerForURLScheme` **in that user's session**.
+as `LSHandlers` entries: the block whose `LSHandlerURLScheme` is `https` names the
+app in `LSHandlerRoleAll`. The plist is binary; read it with
+`plutil -convert json -o - <path>` rather than scraping `defaults read` text —
+every block also contains a nested `LSHandlerPreferredVersions` object, and the
+keys are capitalised (`LSHandlerURLScheme`, not `lsHandlerURLScheme`), both of
+which break naive text parsing. It is *not* a managed preference, so a profile
+cannot set it, and a root daemon cannot set it for another user. Tools like
+`defaultbrowser` work by calling `LSSetDefaultHandlerForURLScheme` **in that
+user's session**.
 
 Consequence: set it once by hand (or per-user), then detect and nudge.
 

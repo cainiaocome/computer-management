@@ -156,9 +156,10 @@ $policy = @{
         @{ id = 'inventory'; type = 'inventory'; class = 'report_only'; enabled = $true; config = @{} }
     )
 }
-Api PUT "/api/v1/admin/groups/$Group" $policy | Out-Null
-Api PUT "/api/v1/admin/devices/$($cfg.device_id)" @{ group = $Group } | Out-Null
-Check "group policy accepted" $true $Group
+$groupResp = Api PUT "/api/v1/admin/groups/$Group" $policy
+Check "group policy accepted" ($groupResp -ne $null) $Group
+$devResp = Api PUT "/api/v1/admin/devices/$($cfg.device_id)" @{ group = $Group }
+Check "device assigned to group" ($devResp -ne $null) $Group
 
 # --- 4. apply --------------------------------------------------------------
 Section "apply"
@@ -186,6 +187,10 @@ if ($policyExists) {
     Check "wildcard blocks other extensions" ($wildcard.installation_mode -eq 'blocked') "$($wildcard.installation_mode)"
     Check "telemetry disabled by default" ($doc.policies.DisableTelemetry -eq $true)
     Check "firefox report is honest (status matches disk)" ($ffStatus -in @('changed', 'compliant')) "$ffStatus"
+    $inv = $reports | Where-Object { $_.id -eq 'inventory' }
+    Check "inventory does not claim Firefox is installed just because a policy was pre-staged" ($inv.detail.firefox -eq $false) "$($inv.detail.firefox)"
+    $ff = $reports | Where-Object { $_.id -eq 'firefox' }
+    Check "firefox report says the policy is only pre-staged" ($ff.message -match 'not installed') $ff.message
 } else {
     # App Management / permission problems are legitimate, but the agent must
     # then say so instead of claiming success.

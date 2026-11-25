@@ -125,9 +125,12 @@ func (a *Agent) Once(ctx context.Context) ([]protocol.ModuleReport, error) {
 
 	reports := a.apply(ctx, resp.Bundle)
 	if err := a.Client.Report(ctx, a.Cfg.DeviceID, a.Cfg.DeviceSecret, resp.Bundle.Generation, reports); err != nil {
-		// The policy was applied; failing to report is not fatal, the next
-		// cycle will report again.
-		a.Log.Warn("report failed", "error", err)
+		// The policy was applied but the server did not hear about it. Do NOT
+		// record the generation: the early return above would then suppress all
+		// later cycles, and these reports would be lost until the policy
+		// changed. Modules are idempotent, so re-applying next cycle is safe.
+		a.Log.Warn("report failed; will re-apply and report on the next cycle", "error", err)
+		return reports, nil
 	}
 
 	a.Cfg.Generation = resp.Bundle.Generation

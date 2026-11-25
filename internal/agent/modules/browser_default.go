@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/cainiaocome/computer-management/internal/policy"
@@ -81,12 +83,7 @@ func currentDefaultBrowser(ctx context.Context, e *Env) (string, error) {
 		}
 		return normalizeBrowser(out), nil
 	case "darwin":
-		out, err := e.Run.Run(ctx, "defaults", "read",
-			"com.apple.LaunchServices/com.apple.launchservices.secure", "LSHandlers")
-		if err != nil {
-			return "", fmt.Errorf("defaults read: %w", err)
-		}
-		return parseDarwinHandlers(out), nil
+		return darwinDefaultBrowser(ctx, e)
 	default:
 		out, err := e.Run.Run(ctx, "xdg-settings", "get", "default-web-browser")
 		if err != nil {
@@ -102,7 +99,7 @@ func normalizeBrowser(s string) string {
 	switch {
 	case strings.Contains(l, "firefox"):
 		return "firefox"
-	case strings.Contains(l, "chrome"):
+	case strings.Contains(l, "chrome"), strings.Contains(l, "chromium"):
 		return "chrome"
 	case strings.Contains(l, "edge"):
 		return "edge"
@@ -114,28 +111,71 @@ func normalizeBrowser(s string) string {
 	return "unknown"
 }
 
-// parseDarwinHandlers finds the handler registered for the https scheme.
-// The `defaults` output is an old-style plist; blocks look like:
+// darwinDefaultBrowser reads the LaunchServices handler for the https scheme.
 //
-//	{
-//	    LSHandlerContentType = "public.html";
-//	    LSHandlerRoleAll = "com.google.chrome";
-//	},
-//
-// and the scheme entry uses lsHandlerURLScheme = https.
+// The file is a per-user binary plist, so it is converted to JSON rather than
+// scraped. Scraping the `defaults read` text was wrong twice over: the real key
+// is "LSHandlerURLScheme" (not "lsHandlerURLScheme"), and every handler block
+// contains a nested "LSHandlerPreferredVersions" whose closing brace ended the
+// scan early. The result was always "unknown".
+func darwinDefaultBrowser(ctx context.Context, e *Env) (string, error) {
+	plist, err := darwinLaunchServicesPlist(ctx, e)
+	if err != nil {
+		return "", err
+	}
+	out, err := e.Run.Run(ctx, "plutil", "-convert", "json", "-o", "-", plist)
+	if err != nil {
+		return "", fmt.Errorf("plutil: %w", err)
+	}
+	return parseDarwinHandlers(out), nil
+}
+
+// darwinLaunchServicesPlist returns the console user's LaunchServices plist.
+// A LaunchDaemon runs as root, and root's own preferences say nothing about the
+// person using the machine.
+func darwinLaunchServicesPlist(ctx context.Context, e *Env) (string, error) {
+	home := ""
+	if out, err := e.Run.Run(ctx, "stat", "-f", "%Su", "/dev/console"); err == nil {
+		if u := strings.TrimSpace(out); u != "" && u != "root" && u != "loginwindow" {
+			if h, err := e.Run.Run(ctx, "dscl", ".", "-read", "/Users/"+u, "NFSHomeDirectory"); err == nil {
+				if i := strings.Index(h, ":"); i >= 0 {
+					home = strings.TrimSpace(h[i+1:])
+				}
+			}
+		}
+	}
+	if home == "" {
+		h, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		home = h
+	}
+	return filepath.Join(home, "Library", "Preferences",
+		"com.apple.LaunchServices", "com.apple.launchservices.secure.plist"), nil
+}
+
+// parseDarwinHandlers finds the handler registered for the https scheme in
+// `plutil -convert json` output. "unset" means the file has no explicit https
+// handler, which is a real answer: nobody has chosen a default browser.
 func parseDarwinHandlers(out string) string {
-	idx := strings.Index(out, "lsHandlerURLScheme = https")
-	if idx < 0 {
+	var doc struct {
+		LSHandlers []struct {
+			LSHandlerURLScheme string `json:"LSHandlerURLScheme"`
+			LSHandlerRoleAll   string `json:"LSHandlerRoleAll"`
+		} `json:"LSHandlers"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
 		return "unknown"
 	}
-	rest := out[idx:]
-	if end := strings.Index(rest, "}"); end > 0 {
-		rest = rest[:end]
+	for _, h := range doc.LSHandlers {
+		if !strings.EqualFold(h.LSHandlerURLScheme, "https") {
+			continue
+		}
+		if h.LSHandlerRoleAll == "" || h.LSHandlerRoleAll == "-" {
+			continue
+		}
+		return normalizeBrowser(h.LSHandlerRoleAll)
 	}
-	if i := strings.Index(rest, "LSHandlerRoleAll = "); i >= 0 {
-		val := strings.TrimSpace(rest[i+len("LSHandlerRoleAll = "):])
-		val = strings.Trim(val, `"; `)
-		return normalizeBrowser(val)
-	}
-	return "unknown"
+	return "unset"
 }

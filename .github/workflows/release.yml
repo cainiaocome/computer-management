@@ -42,9 +42,15 @@ on:
         required: false
         default: false
         type: boolean
+      allow_any_commit:
+        description: 'Allow releasing a commit that is not an ancestor of origin/main'
+        required: false
+        default: false
+        type: boolean
 
+# Read-only by default: the write token is granted only to the publish job.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release
@@ -73,6 +79,7 @@ jobs:
           IN_PRERELEASE: ${{ inputs.prerelease }}
           IN_DRAFT: ${{ inputs.draft }}
           IN_DRY_RUN: ${{ inputs.dry_run }}
+          IN_ALLOW_ANY_COMMIT: ${{ inputs.allow_any_commit }}
         run: |
           set -euo pipefail
 
@@ -130,6 +137,18 @@ jobs:
           fi
 
           if [ "$release" = "true" ]; then
+            # Only release what is on main (or a tag reachable from it), unless the
+            # operator explicitly overrides. Tags and manual runs used to be able to
+            # publish any branch.
+            if [ "${IN_ALLOW_ANY_COMMIT:-false}" != "true" ]; then
+              git fetch -q --no-tags origin +refs/heads/main:refs/remotes/origin/main || true
+              if git rev-parse -q --verify refs/remotes/origin/main >/dev/null; then
+                if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+                  echo "::error::$GITHUB_SHA is not on main; re-run with allow_any_commit=true if this is intentional"
+                  exit 1
+                fi
+              fi
+            fi
             if ! printf '%s' "$version" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
               echo "::error::'$version' is not a valid version (expected vMAJOR.MINOR.PATCH[-pre])"
               exit 1
@@ -164,12 +183,16 @@ jobs:
     name: gate / tests
     needs: prepare
     if: needs.prepare.outputs.release == 'true'
+    with:
+      concurrency_suffix: release
     uses: ./.github/workflows/ci.yml
 
   real-os:
     name: gate / real OS
     needs: prepare
     if: needs.prepare.outputs.release == 'true'
+    with:
+      concurrency_suffix: release
     uses: ./.github/workflows/os-e2e.yml
 
   build:
@@ -228,7 +251,8 @@ jobs:
           path: dist
 
       - name: create the release
-        uses: softprops/action-gh-release@v2
+        # Pinned to a commit: this step is the only one holding the write token.
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           # For a manual run this creates the tag at the tested commit.
           tag_name: ${{ needs.prepare.outputs.version }}
@@ -275,6 +299,8 @@ jobs:
       needs.prepare.outputs.release == 'true' &&
       needs.prepare.outputs.draft != 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/download-artifact@v4
         with:

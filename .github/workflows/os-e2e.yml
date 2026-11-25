@@ -18,9 +18,18 @@ on:
   workflow_dispatch:
   # Called by release.yml so a release cannot be cut unless the real-OS suites pass.
   workflow_call:
+    inputs:
+      concurrency_suffix:
+        description: 'Distinguishes a release gate from a push run on the same ref'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
 
 concurrency:
-  group: os-e2e-${{ github.ref }}
+  group: os-e2e-${{ github.ref }}-${{ inputs.concurrency_suffix }}
   cancel-in-progress: true
 
 jobs:

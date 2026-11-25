@@ -46,10 +46,13 @@ func (MacConsent) Apply(ctx context.Context, item protocol.Item) Outcome {
 	}
 
 	granted := map[string]bool{}
+	applicable := map[string]bool{} // false = nothing to grant yet (e.g. no Firefox)
 	for _, g := range required {
 		switch g {
 		case "app_management":
-			granted[g] = probeAppManagement(e)
+			var ok bool
+			granted[g], ok = probeAppManagement(e)
+			applicable[g] = ok
 		case "full_disk_access":
 			granted[g] = probeFullDiskAccess(e)
 		case "screen_recording":
@@ -61,18 +64,32 @@ func (MacConsent) Apply(ctx context.Context, item protocol.Item) Outcome {
 	}
 
 	missing := make([]string, 0, len(required))
+	na := make([]string, 0, len(required))
 	for _, g := range required {
-		if !granted[g] {
+		switch {
+		case granted[g]:
+		case applicable[g] == false && g == "app_management":
+			// Nothing to grant yet: do not claim it is granted.
+			na = append(na, g)
+		default:
 			missing = append(missing, g)
 		}
 	}
 	detail := map[string]any{
-		"required": required,
-		"granted":  granted,
-		"missing":  missing,
-		"open":     "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles",
+		"required":       required,
+		"granted":        granted,
+		"missing":        missing,
+		"not_applicable": na,
+		"open":           "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles",
 	}
 	if len(missing) == 0 {
+		if len(na) == len(required) {
+			return Outcome{
+				Status:  protocol.StatusUnsupported,
+				Message: "nothing to grant yet: " + strings.Join(na, ", ") + " applies only once Firefox is installed",
+				Detail:  detail,
+			}
+		}
 		return Outcome{Status: protocol.StatusCompliant, Message: "all required consent grants present", Detail: detail}
 	}
 	return Outcome{
@@ -85,22 +102,26 @@ func (MacConsent) Apply(ctx context.Context, item protocol.Item) Outcome {
 // probeAppManagement attempts a write inside the Firefox bundle, which is what
 // the Firefox policy module needs. A permission error means App Management has
 // not been granted; a missing bundle means "not applicable".
-func probeAppManagement(e *Env) bool {
-	dir := e.Resolve("/Applications/Firefox.app/Contents/Resources/distribution")
-	if !fileExists(filepath.Join(dir, "policies.json")) && !fileExists(e.Resolve("/Applications/Firefox.app")) {
-		return true // no Firefox, nothing to grant
+func probeAppManagement(e *Env) (granted, applicable bool) {
+	app := e.Resolve("/Applications/Firefox.app")
+	if !pathExists(app) {
+		return false, false // no Firefox, nothing to grant
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return false
+	// Write into a directory that is part of the real bundle. Creating it here
+	// (the previous behaviour) fabricated a Firefox.app that did not exist and
+	// made the module report a grant it had never tested.
+	dir := filepath.Join(app, "Contents", "Resources")
+	if !pathExists(dir) {
+		return false, false
 	}
 	f, err := os.CreateTemp(dir, ".fleet-probe-*")
 	if err != nil {
-		return false
+		return false, true
 	}
 	name := f.Name()
 	f.Close()
 	os.Remove(name)
-	return true
+	return true, true
 }
 
 // probeFullDiskAccess tries to open TCC-protected user directories. Only the

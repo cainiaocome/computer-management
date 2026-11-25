@@ -15,25 +15,35 @@ func browserItem(t *testing.T, cfg string) protocol.Item {
 		Enabled: true, Config: json.RawMessage(cfg)}
 }
 
-const darwinDefaultsFirefox = `(
-        {
-        LSHandlerContentType = "public.html";
-        LSHandlerRoleAll = "com.google.chrome";
+// Real `plutil -convert json` output. Note that every handler contains a nested
+// LSHandlerPreferredVersions object, and that keys are capitalised: the old
+// parser searched for a lower-case key and stopped at the nested "}".
+const darwinDefaultsFirefox = `{
+  "LSHandlers": [
+    {
+      "LSHandlerPreferredVersions": {"LSHandlerRoleAll": "-"},
+      "LSHandlerRoleAll": "us.zoom.xos",
+      "LSHandlerURLScheme": "zoomphonecall"
     },
-        {
-        lsHandlerURLScheme = https;
-        LSHandlerRoleAll = "org.mozilla.firefox";
+    {
+      "LSHandlerPreferredVersions": {"LSHandlerRoleAll": "-"},
+      "LSHandlerRoleAll": "org.mozilla.firefox",
+      "LSHandlerURLScheme": "https"
     }
-)
-`
+  ]
+}`
 
-const darwinDefaultsChrome = `(
-        {
-        lsHandlerURLScheme = https;
-        LSHandlerRoleAll = "com.google.chrome";
+const darwinDefaultsChrome = `{
+  "LSHandlers": [
+    {
+      "LSHandlerPreferredVersions": {"LSHandlerRoleAll": "-"},
+      "LSHandlerRoleAll": "com.google.chrome",
+      "LSHandlerURLScheme": "https"
     }
-)
-`
+  ]
+}`
+
+const darwinDefaultsUnset = `{"LSHandlers": [{"LSHandlerURLScheme": "mailto", "LSHandlerRoleAll": "com.apple.mail"}]}`
 
 func TestBrowserDefaultCompliant(t *testing.T) {
 	r := &fakeRunner{handler: func(name string, args []string) (string, error) {
@@ -81,8 +91,10 @@ func TestParseDarwinHandlers(t *testing.T) {
 		darwinDefaultsFirefox: "firefox",
 		darwinDefaultsChrome:  "chrome",
 		"no handlers here":    "unknown",
-		`{ lsHandlerURLScheme = https; LSHandlerRoleAll = "com.microsoft.edgemac"; }`: "edge",
+		darwinDefaultsUnset:   "unset",
 	}
+	edge := `{"LSHandlers":[{"LSHandlerURLScheme":"https","LSHandlerRoleAll":"com.microsoft.edgemac"}]}`
+	cases[edge] = "edge"
 	for in, want := range cases {
 		if got := parseDarwinHandlers(in); got != want {
 			t.Errorf("parse(%q) = %q, want %q", in, got, want)

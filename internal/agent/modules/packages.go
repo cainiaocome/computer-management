@@ -56,6 +56,10 @@ func (Packages) Apply(ctx context.Context, item protocol.Item) Outcome {
 		names = append(names, p.Name)
 	}
 
+	if err := checkNames(missing); err != nil {
+		return failed(err)
+	}
+
 	if e.DryRun {
 		return Outcome{
 			Status:  protocol.StatusDrifted,
@@ -64,8 +68,12 @@ func (Packages) Apply(ctx context.Context, item protocol.Item) Outcome {
 		}
 	}
 
-	if _, err := e.Run.Run(ctx, mgr, installArgs(mgr, missing)...); err != nil {
-		return failed(fmt.Errorf("%s install: %w", mgr, err))
+	// winget takes one package per invocation, so a single call would silently
+	// install only the first missing package.
+	for _, batch := range installBatches(mgr, missing) {
+		if _, err := e.Run.Run(ctx, mgr, installArgs(mgr, batch)...); err != nil {
+			return failed(fmt.Errorf("%s install: %w", mgr, err))
+		}
 	}
 
 	stillMissing, err := missingPackages(ctx, e, mgr, missing)
@@ -105,6 +113,41 @@ func resolveManager(e *Env, want string) (string, error) {
 	return want, nil
 }
 
+// installBatches splits the work so that each invocation installs something
+// meaningful: winget only accepts one package at a time.
+func installBatches(mgr string, pkgs []Package) [][]Package {
+	if mgr != "winget" {
+		return [][]Package{pkgs}
+	}
+	out := make([][]Package, 0, len(pkgs))
+	for _, p := range pkgs {
+		out = append(out, []Package{p})
+	}
+	return out
+}
+
+// checkNames rejects package identifiers that would be read as options.
+//
+// There is no shell involved, but "apt-get install -oDPkg::Pre-Invoke::=..."
+// is still a way to run a command, and a name beginning with "-" can never be a
+// real package. See docs/design.md: the agent must not become an exec channel.
+func checkNames(pkgs []Package) error {
+	for _, p := range pkgs {
+		for _, ref := range []string{p.Name, p.ID} {
+			if ref == "" {
+				continue
+			}
+			if strings.HasPrefix(ref, "-") {
+				return fmt.Errorf("package %q: identifiers may not start with '-'", ref)
+			}
+			if strings.ContainsAny(ref, "\x00\n\r") {
+				return fmt.Errorf("package %q: control characters are not allowed", ref)
+			}
+		}
+	}
+	return nil
+}
+
 func installArgs(mgr string, pkgs []Package) []string {
 	switch mgr {
 	case "brew":
@@ -120,7 +163,6 @@ func installArgs(mgr string, pkgs []Package) []string {
 		}
 		return out
 	case "winget":
-		// winget takes one package per invocation; the caller loops below.
 		return []string{"install", "--silent", "--accept-package-agreements", "--accept-source-agreements", pkgRef(mgr, pkgs[0])}
 	}
 	return nil

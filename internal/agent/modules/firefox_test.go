@@ -76,8 +76,32 @@ func TestRenderFirefoxPolicyRejectsIncompleteExtension(t *testing.T) {
 	}
 }
 
+// fakeFirefoxApp imitates an installed Firefox: on macOS the bundle is a
+// directory, which is exactly what the old fileExists check got wrong.
+func fakeFirefoxApp(t *testing.T, root string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "Applications/Firefox.app/Contents/Resources"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFirefoxApplyRefusesToFabricateAnAppBundle(t *testing.T) {
+	root := t.TempDir()
+	e := testEnv("darwin", root, &fakeRunner{})
+	item := firefoxItem(t, `{"extensions":[{"id":"a@b","url":"https://example.com/a.xpi"}]}`)
+
+	out := FirefoxPolicy{}.Apply(ctxWith(e), item)
+	if out.Status != protocol.StatusUnsupported {
+		t.Fatalf("want unsupported without Firefox, got %s (%s)", out.Status, out.Message)
+	}
+	if pathExists(filepath.Join(root, "Applications/Firefox.app")) {
+		t.Fatal("must not create a fake Firefox.app bundle")
+	}
+}
+
 func TestFirefoxApplyWritesAndIsIdempotent(t *testing.T) {
 	root := t.TempDir()
+	fakeFirefoxApp(t, root)
 	e := testEnv("darwin", root, &fakeRunner{})
 	item := firefoxItem(t, `{
 		"extensions": [{"id":"a@b","url":"https://example.com/a.xpi"}],
@@ -106,6 +130,7 @@ func TestFirefoxApplyWritesAndIsIdempotent(t *testing.T) {
 
 func TestFirefoxApplyDryRunDoesNotWrite(t *testing.T) {
 	root := t.TempDir()
+	fakeFirefoxApp(t, root)
 	e := testEnv("darwin", root, &fakeRunner{})
 	e.DryRun = true
 	item := firefoxItem(t, `{"extensions":[{"id":"a@b","url":"https://example.com/a.xpi"}]}`)

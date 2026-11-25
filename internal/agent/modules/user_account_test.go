@@ -1,6 +1,7 @@
 package modules
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -96,5 +97,59 @@ func TestMacConsentIsUnsupportedOffMac(t *testing.T) {
 	out := MacConsent{}.Apply(ctxWith(e), item)
 	if out.Status != protocol.StatusUnsupported {
 		t.Fatalf("want unsupported, got %s", out.Status)
+	}
+}
+
+func TestContainsUserLineCaseAndDomainPrefix(t *testing.T) {
+	// Real "net localgroup Administrators" output shape, members listed between
+	// the rule lines, one per line, in stored case.
+	windowsOut := `
+Alias name     Administrators
+Comment        Administrators have complete and unrestricted access
+
+
+
+Members
+
+-------------------------------------------------------------------------------
+Administrator
+jean-luc
+AzureAD\Alice
+The command completed successfully.
+`
+	for _, u := range []string{"jean-luc", "Alice", "AzureAD\\Alice", "administrator"} {
+		if !containsUserLine(windowsOut, u) {
+			t.Fatalf("%q should be recognised as an administrator", u)
+		}
+	}
+	// A prefix of a real member must not match: this is how "alice" used to
+	// match "jean-luc" via the hyphen split, or "luc" match at all.
+	for _, u := range []string{"jean", "luc", "Ali"} {
+		if containsUserLine(windowsOut, u) {
+			t.Fatalf("%q must not match", u)
+		}
+	}
+}
+
+func TestUserIsAdminReadsTheAnswerNotTheTokens(t *testing.T) {
+	cases := []struct {
+		out  string
+		want bool
+	}{
+		{"yes jean-luc is a member of admin\n", true},
+		{"no jean-luc is NOT a member of admin\n", false},
+	}
+	for _, c := range cases {
+		r := &fakeRunner{handler: func(name string, args []string) (string, error) {
+			return c.out, nil
+		}}
+		e := testEnv("darwin", t.TempDir(), r)
+		got, err := userIsAdmin(context.Background(), e, "jean-luc")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != c.want {
+			t.Fatalf("%q: got %v, want %v", strings.TrimSpace(c.out), got, c.want)
+		}
 	}
 }

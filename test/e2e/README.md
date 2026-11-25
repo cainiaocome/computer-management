@@ -165,3 +165,17 @@ runner would be both slow and a licence problem.
 4. If the assertion depends on a human click (a consent or identity gate), assert
    the *reported* status instead of the end state, and make sure the status is
    never `compliant` when the effect is absent.
+
+### Checks added after an independent review
+
+- `inventory` reports `firefox: true` when `/Applications/Firefox.app` exists. The
+  bundle is a directory, and a "is not a directory" existence check used to call
+  every real Firefox installation missing.
+- `macos.consent` is cross-checked against a direct write attempt into the bundle
+  made by the test itself: `compliant` requires that the test's own write worked.
+- Idempotency is tested by re-publishing the *same* policy, which bumps the
+  generation so every module really runs again. The older check passed even for a
+  module that rewrote its file every time, because with an unchanged generation
+  the agent returns before any module executes.
+- `file` and `packages` refuse autostart/credential paths and `-`-prefixed package
+  names; unit tests cover both (see `docs/design.md` §7.1).

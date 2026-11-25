@@ -7,9 +7,21 @@ on:
   workflow_dispatch:
   # Called by release.yml so a release cannot be cut unless this passes.
   workflow_call:
+    inputs:
+      concurrency_suffix:
+        description: 'Distinguishes a release gate from a push run on the same ref'
+        required: false
+        type: string
+        default: ''
 
+permissions:
+  contents: read
+
+# A release gate calls this workflow on the same ref as the push that triggered
+# it; without the suffix the two runs would cancel each other, which used to turn
+# every release commit red.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ inputs.concurrency_suffix }}
   cancel-in-progress: true
 
 jobs:

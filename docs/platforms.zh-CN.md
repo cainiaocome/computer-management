@@ -222,10 +222,13 @@ root 无法"变成"用户的图形会话。要以某用户身份操作需要 `la
 
 默认处理程序是按用户的 `LaunchServices` 状态，保存在
 `~/Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist`
-的 `LSHandlers` 条目里（`lsHandlerURLScheme = https` → `LSHandlerRoleAll =
-org.mozilla.firefox`）。它**不是**受管偏好，因此配置描述文件设不了它，root 守护
-进程也无法为其他用户设置。`defaultbrowser` 之类的工具是在**该用户的会话里**调用
-`LSSetDefaultHandlerForURLScheme` 实现的。
+的 `LSHandlers` 条目里：`LSHandlerURLScheme` 为 `https` 的那个块，其
+`LSHandlerRoleAll` 就是浏览器。该 plist 是二进制格式，应使用
+`plutil -convert json -o - <path>` 读取，而不是抓 `defaults read` 的文本——每个块里
+还嵌着 `LSHandlerPreferredVersions` 对象，且键名是大写开头的（`LSHandlerURLScheme`，
+不是 `lsHandlerURLScheme`），这两点都会让朴素文本解析出错。它**不是**受管偏好，
+因此配置描述文件设不了它，root 守护进程也无法为其他用户设置。`defaultbrowser`
+之类的工具是在**该用户的会话里**调用 `LSSetDefaultHandlerForURLScheme` 实现的。
 
 结论：手工（或以该用户身份）设置一次，之后检测并提示。
 

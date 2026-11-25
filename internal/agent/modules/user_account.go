@@ -75,7 +75,12 @@ func (UserAccount) Apply(ctx context.Context, item protocol.Item) Outcome {
 	if err := demoteUser(ctx, e, cfg.Username); err != nil {
 		return failed(err)
 	}
-	if admin, err := userIsAdmin(ctx, e, cfg.Username); err == nil && admin {
+	admin, err := userIsAdmin(ctx, e, cfg.Username)
+	if err != nil {
+		// Do not claim success when the verification itself failed.
+		return failed(fmt.Errorf("could not verify that %q was demoted: %w", cfg.Username, err))
+	}
+	if admin {
 		return Outcome{Status: protocol.StatusError, Message: fmt.Sprintf("could not demote %q", cfg.Username), Detail: detail}
 	}
 	return Outcome{Status: protocol.StatusChanged, Message: fmt.Sprintf("%q is now a standard user", cfg.Username), Detail: detail}
@@ -99,11 +104,20 @@ func userIsAdmin(ctx context.Context, e *Env, user string) (bool, error) {
 		}
 		return containsUserLine(out, user), nil
 	case "darwin":
-		out, err := e.Run.Run(ctx, "dscl", ".", "-read", "/Groups/admin", "GroupMembership")
-		if err != nil {
-			return false, fmt.Errorf("dscl: %w", err)
+		// checkmember follows nested groups, which a flat GroupMembership read
+		// does not, and its answer is unambiguous ("yes"/"no").
+		out, err := e.Run.Run(ctx, "dseditgroup", "-o", "checkmember", "-m", user, "admin")
+		answer := strings.ToLower(strings.TrimSpace(out))
+		switch {
+		case strings.HasPrefix(answer, "yes"):
+			return true, nil
+		case strings.HasPrefix(answer, "no"):
+			return false, nil
 		}
-		return containsUserLine(out, user), nil
+		if err != nil {
+			return false, fmt.Errorf("dseditgroup -o checkmember: %w", err)
+		}
+		return false, fmt.Errorf("unexpected dseditgroup output: %q", strings.TrimSpace(out))
 	default:
 		out, err := e.Run.Run(ctx, "id", "-nG", user)
 		if err != nil {
@@ -137,14 +151,30 @@ func demoteUser(ctx context.Context, e *Env, user string) error {
 	}
 }
 
-// containsUserLine reports whether user appears as a whitespace-separated token.
+// containsUserLine reports whether user appears in a group listing.
+//
+// Names are compared case-insensitively and with any DOMAIN\ or BUILTIN\ prefix
+// removed, because that is how Windows prints members. Hyphens are NOT
+// separators: a user called "jean-luc" must not be split into "jean" and "luc",
+// which previously made such users look like standard users while they were
+// administrators.
 func containsUserLine(out, user string) bool {
+	want := bareUser(user)
 	for _, f := range strings.FieldsFunc(out, func(r rune) bool {
-		return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == ',' || r == ':' || r == '-'
+		return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == ',' || r == ';'
 	}) {
-		if f == user {
+		if strings.EqualFold(bareUser(f), want) {
 			return true
 		}
 	}
 	return false
+}
+
+// bareUser strips a DOMAIN\ or BUILTIN\ prefix and surrounding punctuation.
+func bareUser(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.LastIndexAny(s, `\`); i >= 0 {
+		s = s[i+1:]
+	}
+	return strings.Trim(s, `"';,()`)
 }

@@ -129,6 +129,14 @@ check "replayed enrolment token is rejected" $?
 
 # --- 3. policy -------------------------------------------------------------
 section "policy assignment"
+# Stand in for an installed Firefox. The bundle is a directory, so creating it
+# is also the regression test for "is Firefox installed?" - a plain file check
+# said no even with Firefox in /Applications. Real app bundles look like this.
+APP="/Applications/Firefox.app"
+APPDIR="$APP/Contents/Resources"
+mkdir -p "$APPDIR"
+printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict/></plist>\n' > "$APP/Contents/Info.plist"
+[ -d "$APP" ]; check "a Firefox.app bundle exists for the test" $? "$APP"
 cat > "$WORK/policy.json" <<JSON
 {"policies":[
  {"id":"firefox","type":"firefox.policy","class":"enforce","enabled":true,"config":{
@@ -178,6 +186,10 @@ else
   [ "$FF_STATUS" = "action_required" ]; check "missing policy reported as action_required, not success" $? "$FF_STATUS"
 fi
 
+section "inventory reads the machine, not the policy"
+printf '%s' "$REPORTS" | grep -q '"firefox":true'
+check "inventory sees Firefox, whose bundle is a directory" $? "$(status_of "$REPORTS" inventory)"
+
 section "account state matches reality"
 dseditgroup -o checkmember -m "$STD_USER" admin >/dev/null 2>&1
 [ $? -ne 0 ]; check "standard user is not an administrator" $?
@@ -188,10 +200,21 @@ check "admin user really is an administrator" $?
 
 section "consent is reported, never faked"
 CONSENT=$(status_of "$REPORTS" consent)
+# Ask exactly the question the agent asks, here, and require the same answer.
+if touch "$APPDIR/.e2e-consent-probe" 2>/dev/null; then
+  CAN_WRITE=0; rm -f "$APPDIR/.e2e-consent-probe"
+else
+  CAN_WRITE=1
+fi
 case "$CONSENT" in
-  action_required) [ ! -f "$POLICY" ] || true; pass "consent reported as action_required";;
-  compliant) [ -f "$POLICY" ]; check "consent claims compliant only when App Management is really granted" $? "$CONSENT";;
-  *) fail "consent reported as action_required or compliant - $CONSENT";;
+  compliant)
+    [ "$CAN_WRITE" -eq 0 ]; check "consent claims compliant, and a write into the bundle really works" $? "agent=$CONSENT write_failed=$CAN_WRITE";;
+  action_required)
+    [ "$CAN_WRITE" -ne 0 ]; check "consent reports action_required, and a write into the bundle really fails" $? "agent=$CONSENT write_failed=$CAN_WRITE";;
+  unsupported)
+    pass "consent reported unsupported (nothing to grant)";;
+  *)
+    fail "consent reported something else - $CONSENT";;
 esac
 
 section "default browser is never silently changed"
@@ -209,6 +232,22 @@ GEN_AFTER=$(json_str "$CFG" generation)
 MTIME_AFTER=$(mtime_of "$POLICY")
 [ "$GEN_BEFORE" = "$GEN_AFTER" ]; check "generation unchanged without a policy change" $? "$GEN_BEFORE -> $GEN_AFTER"
 [ "$MTIME_BEFORE" = "$MTIME_AFTER" ]; check "policy file not rewritten on a no-op cycle" $? "mtime changed"
+
+# The check above is weak: with the same generation the agent returns before any
+# module runs, so it would pass even for a module that rewrites every time. Push
+# a new generation whose desired state is identical, so every module really runs
+# again and must find nothing to do.
+api PUT "/api/v1/admin/groups/$GROUP" "$(cat "$WORK/policy.json")" >/dev/null
+"$AGENT" once -config "$CFG" -json -log-level error > "$WORK/reports2.json" 2>"$WORK/once2.err"
+RC2=$?
+check "second apply exits 0" $RC2 "$(cat "$WORK/once2.err")"
+R2=$(cat "$WORK/reports2.json")
+FF2=$(status_of "$R2" firefox)
+MTIME_AFTER2=$(mtime_of "$POLICY")
+note "generation $GEN_AFTER -> $(json_str "$CFG" generation); firefox now $FF2"
+[ "$(json_str "$CFG" generation)" -gt "$GEN_AFTER" ]; check "a re-published policy bumps the generation" $? "generation did not move"
+[ "$FF2" = "compliant" ]; check "re-running with identical desired state writes nothing" $? "$FF2"
+[ "$MTIME_AFTER" = "$MTIME_AFTER2" ]; check "policy file untouched when it is already correct" $? "$MTIME_AFTER -> $MTIME_AFTER2"
 
 # --- 7. launchd ------------------------------------------------------------
 section "launchd"

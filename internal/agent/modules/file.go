@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -34,7 +35,13 @@ func (File) Apply(ctx context.Context, item protocol.Item) Outcome {
 		return failed(fmt.Errorf("path is required"))
 	}
 	e := env(ctx)
+	if !filepath.IsAbs(cfg.Path) {
+		return failed(fmt.Errorf("path %q must be absolute", cfg.Path))
+	}
 	path := e.Resolve(cfg.Path)
+	if err := checkFilePath(e, path); err != nil {
+		return failed(err)
+	}
 
 	ensure := cfg.Ensure
 	if ensure == "" {
@@ -64,6 +71,12 @@ func (File) Apply(ctx context.Context, item protocol.Item) Outcome {
 		if err != nil {
 			return failed(fmt.Errorf("bad mode %q: %w", cfg.Mode, err))
 		}
+		if v > 0o777 {
+			// Special bits (setuid/setgid/sticky) cannot be expressed this way:
+			// os.Chmod would silently drop them while the check below compared
+			// only Perm(), and the item would report compliance forever.
+			return failed(fmt.Errorf("mode %q: special bits are not supported (use 0000-0777)", cfg.Mode))
+		}
 		mode = os.FileMode(v)
 	}
 
@@ -92,4 +105,40 @@ func (File) Apply(ctx context.Context, item protocol.Item) Outcome {
 		return failed(err)
 	}
 	return changed("wrote " + path)
+}
+
+// writeDeny describes locations where a policy-driven file write is equivalent
+// to arbitrary code execution or credential theft. This is defence in depth,
+// not a security boundary: see docs/design.md, "the file module is a write
+// primitive". A server that can choose any other path can still plant code.
+var writeDeny = []string{
+	"/etc/sudoers", "/etc/passwd", "/etc/shadow", "/etc/group",
+	"/etc/gshadow", "/etc/ld.so.preload", "/etc/rc.local", "/etc/profile.d",
+	"/etc/init.d", "/etc/cron", "/var/spool/cron", "/etc/systemd/system",
+	"/usr/lib/systemd/system", "/lib/systemd/system", "/etc/apt/apt.conf.d",
+	"/library/launchdaemons", "/library/launchagents", "/system/library",
+	"/etc/fleet", "/programdata/fleet", "/program files/fleet",
+	"\\windows\\system32", "\\windows\\syswow64", "\\windows\\sysnative",
+}
+
+// checkFilePath rejects paths the agent must never write on policy command.
+func checkFilePath(e *Env, path string) error {
+	rel := path
+	if e.Root != "" {
+		rel = strings.TrimPrefix(rel, e.Root)
+	}
+	rel = strings.ToLower(strings.ReplaceAll(rel, "\\", "/"))
+	for _, d := range writeDeny {
+		if strings.HasPrefix(rel, strings.ReplaceAll(d, "\\", "/")) {
+			return fmt.Errorf("path %q is not managed by policy (autostart, credentials and agent state are off limits)", path)
+		}
+	}
+	if exe, err := os.Executable(); err == nil {
+		if a, err1 := filepath.Abs(exe); err1 == nil {
+			if b, err2 := filepath.Abs(path); err2 == nil && strings.EqualFold(a, b) {
+				return fmt.Errorf("refusing to overwrite the running agent (%s)", b)
+			}
+		}
+	}
+	return nil
 }

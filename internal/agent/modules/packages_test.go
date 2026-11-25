@@ -83,3 +83,30 @@ func TestPackagesNoopOnEmptyList(t *testing.T) {
 		t.Fatalf("want compliant, got %s", out.Status)
 	}
 }
+
+func TestCheckNamesRejectsOptionInjection(t *testing.T) {
+	// "apt-get install -y -oDPkg::Pre-Invoke::=/bin/sh -c id" runs a shell.
+	bad := []Package{{Name: "-oDPkg::Pre-Invoke::=/bin/sh -c id"}}
+	if err := checkNames(bad); err == nil {
+		t.Fatal("a package name starting with '-' must be rejected")
+	}
+	good := []Package{{Name: "git"}, {Name: "ublock-origin"}}
+	if err := checkNames(good); err != nil {
+		t.Fatalf("normal names must pass: %v", err)
+	}
+
+	ctrl := []Package{{Name: "git\nrm -rf /"}}
+	if err := checkNames(ctrl); err == nil {
+		t.Fatal("control characters must be rejected")
+	}
+}
+
+func TestInstallBatchesWingetIsOnePerCall(t *testing.T) {
+	pkgs := []Package{{Name: "a"}, {Name: "b"}, {Name: "c"}}
+	if got := len(installBatches("apt-get", pkgs)); got != 1 {
+		t.Fatalf("apt-get should install in one call, got %d", got)
+	}
+	if got := len(installBatches("winget", pkgs)); got != 3 {
+		t.Fatalf("winget needs one call per package, got %d", got)
+	}
+}

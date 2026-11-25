@@ -155,3 +155,16 @@ GitHub 托管的 `macos-latest` runner *本身就是* Apple 硬件虚拟化上�
    就在于"平台同意你的说法"。
 4. 若断言依赖人工点击（同意闸门或身份闸门），就断言*上报的状态*而不是最终状态，
    并确保当效果不存在时状态永不为 `compliant`。
+
+### 独立评审后新增的检查
+
+- 当 `/Applications/Firefox.app` 存在时，`inventory` 必须报告 `firefox: true`。
+  app bundle 是目录，而"存在且不是目录"的判断会把每一个真实安装的 Firefox 判为
+  缺失。
+- `macos.consent` 会与测试自己发起的真实写入做交叉核对：只有测试自己的写入成功，
+  `compliant` 才算通过。
+- 幂等性改为重新下发*同一份*策略来测试，这会提升 generation，使每个模块真正再跑
+  一遍。旧检查即使面对每次都重写文件的模块也能通过，因为 generation 不变时 agent
+  会在执行任何模块之前就返回。
+- `file` 与 `packages` 会拒绝自启动/凭据路径和以 `-` 开头的包名，两者都有单元测试
+  （见 `docs/design.md` §7.1）。

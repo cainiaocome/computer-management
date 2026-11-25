@@ -58,6 +58,12 @@ func (FirefoxPolicy) Apply(ctx context.Context, item protocol.Item) Outcome {
 	if !ok {
 		return unsupported("no Firefox policy path known for " + env(ctx).GOOS)
 	}
+	installed := HasFirefox(env(ctx))
+	if !installed && env(ctx).GOOS == "darwin" && !pathExists(env(ctx).Resolve("/Applications/Firefox.app")) {
+		// Writing here would fabricate a fake Firefox.app bundle, which later
+		// confuses both this module and macOS. Nothing to do until it is installed.
+		return unsupported("Firefox is not installed; nothing to write under /Applications/Firefox.app")
+	}
 
 	if existing, err := os.ReadFile(path); err == nil && string(existing) == string(rendered) {
 		return compliant("Firefox policy up to date at " + path)
@@ -77,6 +83,14 @@ func (FirefoxPolicy) Apply(ctx context.Context, item protocol.Item) Outcome {
 				})
 		}
 		return failed(err)
+	}
+	if !installed {
+		// The file is pre-staged so it applies the moment Firefox is installed.
+		return Outcome{
+			Status:  protocol.StatusChanged,
+			Message: "wrote Firefox policy to " + path + " (Firefox is not installed yet; it applies on first launch)",
+			Detail:  map[string]any{"path": path, "firefox_installed": false},
+		}
 	}
 	return changed("wrote Firefox policy to " + path)
 }
@@ -180,7 +194,7 @@ func WithEnv(ctx context.Context, e *Env) context.Context {
 // HasFirefox reports whether a Firefox installation looks present.
 func HasFirefox(e *Env) bool {
 	for _, p := range firefoxProbePaths(e.GOOS) {
-		if fileExists(e.Resolve(p)) {
+		if pathExists(e.Resolve(p)) {
 			return true
 		}
 	}

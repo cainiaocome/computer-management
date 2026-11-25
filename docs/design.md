@@ -41,8 +41,9 @@ Working name: **fleet** (repo: `computer-management`).
 - A parent's machine survives OS updates, browser updates, and user fiddling
   without a support call: the agent detects drift and either reverts it or posts a
   single actionable prompt.
-- The server holds no long-lived credential that grants arbitrary code execution
-  on a device.
+- The server holds no credential that can *directly* run a command on a device.
+  It can still write files as root, which is a code-execution primitive in
+  practice; §7.1 states that boundary exactly.
 
 ---
 
@@ -291,18 +292,19 @@ fleet.
 
 Mitigations, in priority order:
 
-1. **No command execution path.** The API has no "run script" endpoint, and the
-   agent has no `exec` primitive reachable from the wire. The wire format only
-   expresses *declarative policy over a fixed module set*. This is the single most
-   important property in the design.
+1. **No direct command execution path.** The API has no "run script" endpoint,
+   and the wire format only expresses *declarative policy over a fixed module
+   set*: there is no `exec` primitive. The remaining primitive is `file`, which
+   writes as root; §7.1 is explicit about what that costs.
 2. **Signed bundles + pinning.** The agent verifies an Ed25519 signature over the
    canonical bundle and ignores anything unsigned or unverifiable. A MITM on the
    transport cannot inject policy.
 3. **Anti-rollback.** `generation` must be strictly increasing.
 4. **Narrow blast radius.** Modules are small, reviewed, and individually
    disableable; `report_only` is the default class for anything new.
-5. **No secrets on the device** beyond the device secret, which is only useful to
-   fetch that device's own policy.
+5. **No secrets on the device** beyond the device secret. That secret can fetch
+   this device's policy *and* post reports for it, so it must be readable only by
+   SYSTEM/Administrators: a local user who can read it can fake compliance.
 6. **Least privilege in the daemon.** The executor drops to a dedicated user for
    package-manager work where possible; it does not read user data.
 7. **Auditability.** Every applied change is reported back with before/after and

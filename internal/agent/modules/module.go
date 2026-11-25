@@ -171,3 +171,11 @@ func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
 }
+
+// pathExists reports whether anything exists at path. Use this for bundles and
+// directories: a macOS .app is a directory, so fileExists would report a
+// perfectly installed Firefox as missing.
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil || !os.IsNotExist(err)
+}
