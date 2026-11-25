@@ -153,9 +153,17 @@ docs/             design, provisioning
 
 ## Releasing
 
-Three ways in, all running the same gates: `go vet`, unit tests, the logical
-end-to-end test, a six-platform cross-compile of both binaries, then a
-checksum pass.
+Three ways in, all running the same gate. Nothing is published until the full
+suite is green **on the exact commit being released**:
+
+- `ci` — `go vet`, unit tests on Linux/macOS/Windows, the logical end-to-end test
+- `os-e2e` — the real-Windows and real-macOS suites (`test/e2e/guest/verify.*`)
+- then a six-platform cross-compile of both binaries and a checksum pass
+
+The gate calls those workflows rather than copying them, so "passing" has one
+definition. Publishing is a separate job that `needs` the gate, and a final job
+downloads the release again to check byte-identity, checksums and that the
+linux binaries run.
 
 | How | Trigger |
 |---|---|
